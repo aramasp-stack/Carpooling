@@ -1,6 +1,8 @@
 /* TransportApp — интерактивный прототип на Яндекс Картах.
    Маршрут = начальная и конечная точки, без промежуточных остановок.
-   Поиск: только «откуда» (все маршруты из этого места) или «откуда — куда».
+   Поиск: при открытии карта пустая; после «откуда» появляются маршруты рядом;
+   после «куда» остаётся один маршрут и список водителей на нём.
+   В машине — схема салона: у каждого места своя цена. Пассажир видит одну итоговую цену.
    Оплата демонстрационная, сервера нет: брони хранятся в браузере. */
 
 const CFG = window.CONFIG || {};
@@ -23,14 +25,15 @@ const store = {
 
 const state = {
   tab: "search",
-  from: null,   // { name, coords:[lat, lon] }
+  from: null,      // { name, coords:[lat, lon] }
   to: null,
+  routeId: null,   // маршрут, выбранный из списка, когда указано только «откуда»
   day: 0,
-  pick: null,   // "from" | "to" — ждём нажатия на карту
-  bookings: store.get("ta2-bookings", []),
+  pick: null,      // "from" | "to" — ждём нажатия на карту
+  bookings: store.get("ta3-bookings", []),
   sim: null
 };
-const saveBookings = () => store.set("ta2-bookings", state.bookings);
+const saveBookings = () => store.set("ta3-bookings", state.bookings);
 
 /* ---------- геометрия (координаты [широта, долгота]) ---------- */
 const rad = x => x * Math.PI / 180;
@@ -128,7 +131,7 @@ async function loadRoute(route) {
   return buildGeom([route.from.coords, route.to.coords], route.minutes * 60, null, "line");
 }
 
-/* ---------- расписание (демо) ---------- */
+/* ---------- расписание и места (демо) ---------- */
 function hash(str) { let h = 5381; for (const c of str) h = ((h << 5) + h + c.charCodeAt(0)) >>> 0; return h; }
 function dayStart(offset) { const d = new Date(); d.setHours(0, 0, 0, 0); d.setDate(d.getDate() + offset); return d; }
 function ymd(d) { return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; }
@@ -140,6 +143,18 @@ function dayLabel(offset) {
 const routeById = id => D.routes.find(r => r.id === id);
 const durOf = route => geoms[route.id] ? geoms[route.id].durSec : route.minutes * 60;
 
+// Места в салоне. Цены мест задаёт водитель; в демо — от базовой цены маршрута.
+function seatsFor(route, total, id) {
+  const base = route.price;
+  const seats = [
+    { id: "front", label: "Переднее", price: base + D.seatPrice.front },
+    { id: "rl", label: "Сзади слева", price: base + D.seatPrice.window },
+    { id: "rm", label: "Сзади посередине", price: base + D.seatPrice.middle },
+    { id: "rr", label: "Сзади справа", price: base + D.seatPrice.window }
+  ];
+  return total === 3 ? seats.filter(s => s.id !== "rm") : seats;
+}
+
 function tripsFor(route, dayOffset) {
   return D.departures.map(t => {
     const [h, m] = t.split(":").map(Number);
@@ -149,9 +164,14 @@ function tripsFor(route, dayOffset) {
     const seed = hash(id);
     const driver = D.drivers[seed % D.drivers.length];
     const total = 3 + (seed >>> 4) % 2;
+    const seats = seatsFor(route, total, id);
     const takenDemo = (seed >>> 7) % total;
-    const mine = state.bookings.filter(b => b.tripId === id && b.status === "paid").reduce((s, b) => s + b.seats, 0);
-    return { id, route, dep, driver, total, taken: Math.min(total, takenDemo + mine) };
+    const order = seats.map(s => s.id).sort((a, b) => hash(id + a) - hash(id + b));
+    const taken = new Set(order.slice(0, takenDemo));
+    state.bookings.filter(b => b.tripId === id && b.status === "paid").forEach(b => b.seatIds.forEach(s => taken.add(s)));
+    seats.forEach(s => { s.taken = taken.has(s.id); });
+    const free = seats.filter(s => !s.taken);
+    return { id, route, dep, driver, seats, free: free.length, minPrice: free.length ? Math.min(...free.map(s => s.price)) : null };
   });
 }
 function tripById(id) {
@@ -166,7 +186,7 @@ function tripById(id) {
 const timeAt = (trip, along) => new Date(trip.dep.getTime() + durOf(trip.route) * 1000 * (along / (geoms[trip.route.id] ? geoms[trip.route.id].total : 1)));
 
 /* ---------- поиск ---------- */
-function searchRoutes() {
+function matchRoutes() {
   if (!state.from) return [];
   const res = [];
   D.routes.forEach(route => {
@@ -179,41 +199,57 @@ function searchRoutes() {
       drop = nearest(g, state.to.coords);
       if (drop.d > D.nearMeters || drop.along < pick.along + 300) return;
     }
-    res.push({ route, g, pick, drop });
+    res.push({ route, g, pick, drop, score: pick.d + (drop ? drop.d : 0) });
   });
-  return res.sort((a, b) => a.pick.d - b.pick.d);
+  return res.sort((a, b) => a.score - b.score);
 }
-function departuresFor(r) {
+// Когда указаны «откуда» и «куда» — остаётся один, самый подходящий маршрут
+function activeMatch(matches) {
+  if (state.to) return matches[0] || null;
+  if (state.routeId) return matches.find(m => m.route.id === state.routeId) || null;
+  return null;
+}
+function driversFor(m) {
   const now = Date.now();
-  return tripsFor(r.route, state.day)
-    .map(trip => ({ trip, at: timeAt(trip, r.pick.along) }))
+  return tripsFor(m.route, state.day)
+    .map(trip => ({ trip, at: timeAt(trip, m.pick.along) }))
     .filter(x => x.at.getTime() > now + 5 * 60000);
 }
 
 /* ---------- карта ---------- */
 let map = null;
-const layers = { routes: {}, ends: null, segment: null, from: null, to: null, pickup: null };
+const layers = { routes: {}, shown: new Set(), ends: null, endsShown: false, segment: null, from: null, to: null, pickup: null };
 
 const isDesktop = () => window.matchMedia("(min-width: 768px)").matches;
 const margins = () => isDesktop() ? [40, 70, 40, 450] : [80, 30, Math.round(window.innerHeight * 0.64) + 10, 30];
 function fit(coords) {
-  if (!map || !coords || coords.length < 2) return;
+  if (!map || !coords || !coords.length) return;
+  if (coords.length === 1) { map.setCenter(coords[0], 14, { duration: 300 }); return; }
   map.setBounds(ymaps.util.bounds.fromPoints(coords), { checkZoomRange: true, zoomMargin: margins(), duration: 400 });
 }
-const fitAll = () => fit(Object.values(geoms).flatMap(g => g.coords));
-
-function focusRoute(id) {
-  Object.entries(layers.routes).forEach(([rid, line]) => {
-    line.options.set("strokeOpacity", !id || id === rid ? 0.9 : 0.15);
+function showLines(ids) {
+  if (!map) return;
+  const want = new Set(ids);
+  Object.entries(layers.routes).forEach(([id, line]) => {
+    if (want.has(id) && !layers.shown.has(id)) { map.geoObjects.add(line); layers.shown.add(id); }
+    if (!want.has(id) && layers.shown.has(id)) { map.geoObjects.remove(line); layers.shown.delete(id); }
+    line.options.set("strokeOpacity", 0.9);
   });
 }
+function showEnds(on) {
+  if (!map || !layers.ends || layers.endsShown === on) return;
+  if (on) map.geoObjects.add(layers.ends); else map.geoObjects.remove(layers.ends);
+  layers.endsShown = on;
+}
 function setSegment(coords, color) {
+  if (!map) return;
   if (layers.segment) { map.geoObjects.remove(layers.segment); layers.segment = null; }
   if (!coords) return;
-  layers.segment = new ymaps.Polyline(coords, {}, { strokeColor: color || "#0f172a", strokeWidth: 9, strokeOpacity: 0.55 });
+  layers.segment = new ymaps.Polyline(coords, {}, { strokeColor: color || "#0f172a", strokeWidth: 9, strokeOpacity: 0.5 });
   map.geoObjects.add(layers.segment);
 }
 function setPointMarker(which) {
+  if (!map) return;
   if (layers[which]) { map.geoObjects.remove(layers[which]); layers[which] = null; }
   const p = state[which];
   if (!p) return;
@@ -223,10 +259,17 @@ function setPointMarker(which) {
   map.geoObjects.add(layers[which]);
 }
 function setPickup(coords) {
+  if (!map) return;
   if (layers.pickup) { map.geoObjects.remove(layers.pickup); layers.pickup = null; }
   if (!coords) return;
   layers.pickup = new ymaps.Placemark(coords, { hintContent: "Здесь водитель может вас подобрать" }, { preset: "islands#blueCircleDotIcon" });
   map.geoObjects.add(layers.pickup);
+}
+function clearMap() {
+  showLines([]);
+  showEnds(false);
+  setSegment(null);
+  setPickup(null);
 }
 
 function loadYmaps() {
@@ -246,24 +289,23 @@ const ready = (async () => {
   map.controls.add(traffic, { float: "none", position: { top: 16, right: 16 } });
   map.controls.add("zoomControl", { size: "small", float: "none", position: { top: 70, right: 16 } });
 
-  map.events.add("click", async e => {
+  map.events.add("click", e => {
     if (!state.pick) return;
     const which = state.pick;
     state.pick = null;
     const coords = e.get("coords");
-    await setPlace(which, { name: "Точка на карте", coords });
-    reverseName(coords).then(name => { if (name && state[which] && state[which].coords === coords) { state[which].name = name; if (state.tab === "search") renderSearch(); } });
+    setPlace(which, { name: "Точка на карте", coords });
+    reverseName(coords).then(name => {
+      if (name && state[which] && state[which].coords === coords) { state[which].name = name; if (state.tab === "search") renderSearch(); }
+    });
   });
 
   const loaded = await Promise.all(D.routes.map((r, i) => sleep(i * 120).then(() => loadRoute(r))));
   D.routes.forEach((route, i) => {
     geoms[route.id] = loaded[i];
-    const line = new ymaps.Polyline(loaded[i].coords, { hintContent: `${route.id}: ${route.from.name} → ${route.to.name}` }, {
-      strokeColor: route.color, strokeWidth: 5, strokeOpacity: 0.9
+    layers.routes[route.id] = new ymaps.Polyline(loaded[i].coords, { hintContent: `${route.from.name} → ${route.to.name}` }, {
+      strokeColor: route.color, strokeWidth: 6, strokeOpacity: 0.9
     });
-    line.events.add("click", () => { switchTab("routes"); showRoute(route); });
-    layers.routes[route.id] = line;
-    map.geoObjects.add(line);
   });
   const ends = new ymaps.GeoObjectCollection();
   const seen = new Set();
@@ -271,24 +313,50 @@ const ready = (async () => {
     const k = p.coords.join(",");
     if (seen.has(k)) return;
     seen.add(k);
-    const pm = new ymaps.Placemark(p.coords, { hintContent: p.name + " — нажмите, чтобы ехать отсюда" }, { preset: "islands#darkBlueCircleDotIcon" });
-    pm.events.add("click", () => { setPlace("from", { name: p.name, coords: p.coords }); switchTab("search"); });
-    ends.add(pm);
+    ends.add(new ymaps.Placemark(p.coords, { hintContent: p.name }, { preset: "islands#darkBlueCircleDotIcon" }));
   }));
   layers.ends = ends;
-  map.geoObjects.add(ends);
-  fitAll();
+  refreshMapForTab();
 })();
 ready.catch(e => {
   $("#map").innerHTML = `<div class="empty" style="padding-top:80px">Не удалось загрузить Яндекс Карты. Проверьте интернет и обновите страницу.</div>`;
   console.error(e);
 });
 
+function refreshMapForTab() {
+  if (!map) return;
+  if (state.tab === "search") updateSearchMap();
+  if (state.tab === "routes") { clearMap(); showLines(D.routes.map(r => r.id)); showEnds(true); fit(Object.values(geoms).flatMap(g => g.coords)); }
+}
+
+// Карта на вкладке «Поиск»: пустая → маршруты рядом с «откуда» → один маршрут
+function updateSearchMap() {
+  if (!map) return;
+  setSegment(null);
+  setPickup(null);
+  showEnds(false);
+  setPointMarker("from");
+  setPointMarker("to");
+  const matches = matchRoutes();
+  const active = activeMatch(matches);
+  if (!state.from) { showLines([]); map.setCenter(YEREVAN.center, 12, { duration: 300 }); return; }
+  if (active) {
+    showLines([active.route.id]);
+    const end = active.drop ? active.drop.along : active.g.total;
+    setSegment(subLine(active.g, active.pick.along, end), active.route.color);
+    setPickup(pointAt(active.g, active.pick.along));
+    fit([...active.g.coords, state.from.coords, ...(state.to ? [state.to.coords] : [])]);
+    return;
+  }
+  showLines(matches.map(m => m.route.id));
+  fit([state.from.coords, ...(state.to ? [state.to.coords] : []), ...matches.flatMap(m => m.g.coords)]);
+}
+
 /* ---------- адреса ---------- */
-async function setPlace(which, place) {
+function setPlace(which, place) {
   state[which] = place;
-  if (map) setPointMarker(which);
-  if (state.tab === "search") renderSearch();
+  state.routeId = null;
+  if (state.tab === "search") { renderSearch(); updateSearchMap(); }
 }
 async function geocode(text) {
   if (!HAS_KEY || !window.ymaps) return [];
@@ -326,21 +394,19 @@ function modal(html) { $("#modal-card").innerHTML = html; $("#modal").hidden = f
 const closeModal = () => { $("#modal").hidden = true; };
 $("#modal").addEventListener("click", e => { if (e.target.id === "modal") closeModal(); });
 
-function clearMapFocus() {
-  if (!map) return;
-  setSegment(null);
-  setPickup(null);
-  focusRoute(null);
-}
 function switchTab(tab) {
   stopSim();
   state.tab = tab;
   state.pick = null;
   document.querySelectorAll(".tabs button").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
-  clearMapFocus();
+  if (map) {
+    clearMap();
+    if (tab !== "search") ["from", "to"].forEach(w => { if (layers[w]) { map.geoObjects.remove(layers[w]); layers[w] = null; } });
+  }
   if (tab === "search") renderSearch();
   if (tab === "routes") renderRoutes();
   if (tab === "mine") renderMine();
+  refreshMapForTab();
 }
 document.querySelectorAll(".tabs button").forEach(b => b.addEventListener("click", () => switchTab(b.dataset.tab)));
 
@@ -350,9 +416,8 @@ const ICON_SWAP = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" s
 
 function renderSearch() {
   view.innerHTML = `
-    <h2>Куда поедем?</h2>
     <div class="where">
-      <div class="loc"><span class="dot from"></span><input id="in-from" autocomplete="off" placeholder="Откуда — адрес или место" value="${state.from ? esc(state.from.name) : ""}">${state.from ? '<button class="clear" data-clear="from" aria-label="Очистить">×</button>' : ""}</div>
+      <div class="loc"><span class="dot from"></span><input id="in-from" autocomplete="off" placeholder="Откуда поедете?" value="${state.from ? esc(state.from.name) : ""}">${state.from ? '<button class="clear" data-clear="from" aria-label="Очистить">×</button>' : ""}</div>
       <div class="loc"><span class="dot to"></span><input id="in-to" autocomplete="off" placeholder="Куда — можно не указывать" value="${state.to ? esc(state.to.name) : ""}">${state.to ? '<button class="clear" data-clear="to" aria-label="Очистить">×</button>' : ""}</div>
       <button class="swap" id="swap" title="Поменять местами" aria-label="Поменять местами">${ICON_SWAP}</button>
     </div>
@@ -363,14 +428,13 @@ function renderSearch() {
       <button class="pill ${state.pick === "to" ? "on" : ""}" data-pick="to">${ICON_PIN} Куда на карте</button>
     </div>
     <div class="chips">${[0, 1, 2].map(d => `<button class="chip ${d === state.day ? "active" : ""}" data-day="${d}">${dayLabel(d)}</button>`).join("")}</div>
-    <button class="btn" id="go" ${state.from ? "" : "disabled"}>Показать маршруты</button>
-    <p class="muted small" style="margin-top:12px">Достаточно указать «откуда» — покажем все маршруты, которые начинаются или проходят рядом. Начальную точку маршрута можно выбрать и на карте.</p>
-    ${HAS_KEY ? "" : '<div class="note">Ключ Яндекс Карт не задан: пробки видны, но маршруты построены упрощённо, а адреса ищутся только по списку мест. Как добавить ключ — в README.</div>'}`;
+    <div id="results"></div>
+    ${HAS_KEY ? "" : '<div class="note">Ключ Яндекс Карт не задан: пробки видны, но маршруты построены упрощённо, а адреса ищутся только по списку мест.</div>'}`;
 
   bindInput("from");
   bindInput("to");
-  view.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => { const w = b.dataset.clear; state[w] = null; if (map) setPointMarker(w); renderSearch(); });
-  $("#swap").onclick = () => { [state.from, state.to] = [state.to, state.from]; if (map) { setPointMarker("from"); setPointMarker("to"); } renderSearch(); };
+  view.querySelectorAll("[data-clear]").forEach(b => b.onclick = () => setPlace(b.dataset.clear, null));
+  $("#swap").onclick = () => { [state.from, state.to] = [state.to, state.from]; state.routeId = null; renderSearch(); updateSearchMap(); };
   $("#geo").onclick = locateMe;
   view.querySelectorAll("[data-pick]").forEach(b => b.onclick = () => {
     state.pick = state.pick === b.dataset.pick ? null : b.dataset.pick;
@@ -378,7 +442,92 @@ function renderSearch() {
     renderSearch();
   });
   view.querySelectorAll("[data-day]").forEach(b => b.onclick = () => { state.day = +b.dataset.day; renderSearch(); });
-  $("#go").onclick = async () => { await ready; renderResults(); };
+  renderResults();
+}
+
+function renderResults() {
+  const box = $("#results");
+  if (!box) return;
+  if (!state.from) {
+    box.innerHTML = `<div class="hint">${ICON_PIN}<div><strong>Откуда поедете?</strong><br><span class="small muted">Укажите адрес, точку на карте или нажмите «Я здесь» — покажем маршруты рядом. «Куда» можно добавить, чтобы остался один подходящий маршрут.</span></div></div>`;
+    return;
+  }
+  if (!Object.keys(geoms).length) { box.innerHTML = '<div class="empty">Загружаем маршруты…</div>'; ready.then(() => { if (state.tab === "search") { renderResults(); updateSearchMap(); } }); return; }
+  const matches = matchRoutes();
+  const active = activeMatch(matches);
+  if (active) { renderDrivers(box, active, matches.length); return; }
+  if (!matches.length) {
+    box.innerHTML = `<div class="empty">Рядом с этой точкой нет маршрутов${state.to ? " в нужную сторону" : ""}. Попробуйте другую точку или посмотрите вкладку «Маршруты».</div>`;
+    return;
+  }
+  box.innerHTML = `<h3>Маршруты рядом: ${matches.length}</h3><div id="rlist"></div>`;
+  const list = $("#rlist");
+  matches.forEach(m => {
+    const n = driversFor(m).filter(x => x.trip.free).length;
+    const card = document.createElement("button");
+    card.className = "route-card clickable";
+    card.style.setProperty("--c", m.route.color);
+    card.innerHTML = `
+      <div class="route-head">
+        <span class="swatch"></span>
+        <div style="flex:1">
+          <div class="route-title">${esc(m.route.from.name)} → ${esc(m.route.to.name)}</div>
+          <div class="small muted">${m.pick.d < 120 ? "начинается рядом" : `до маршрута ${meters(m.pick.d)} пешком`} · в пути ~${minutes(m.g.durSec)}</div>
+        </div>
+        <span class="chev">›</span>
+      </div>
+      <div class="small" style="margin-top:8px">${n ? `<b>${n}</b> ${plural(n, "водитель", "водителя", "водителей")} · ${dayLabel(state.day).toLowerCase()}` : '<span class="muted">свободных мест нет</span>'}</div>`;
+    card.onclick = () => { state.routeId = m.route.id; renderResults(); updateSearchMap(); };
+    list.appendChild(card);
+  });
+}
+
+function plural(n, one, few, many) {
+  const n10 = n % 10, n100 = n % 100;
+  if (n10 === 1 && n100 !== 11) return one;
+  if (n10 >= 2 && n10 <= 4 && (n100 < 12 || n100 > 14)) return few;
+  return many;
+}
+
+function renderDrivers(box, m, total) {
+  const drivers = driversFor(m);
+  box.innerHTML = `
+    ${!state.to && total > 1 ? '<button class="link back" id="allroutes">← Все маршруты рядом</button>' : ""}
+    <div class="route-card" style="--c:${m.route.color}">
+      <div class="route-head">
+        <span class="swatch"></span>
+        <div style="flex:1">
+          <div class="route-title">${esc(m.route.from.name)} → ${esc(m.route.to.name)}</div>
+          <div class="small muted">${m.pick.d < 120 ? "маршрут начинается рядом" : `до маршрута ${meters(m.pick.d)} пешком`}${m.drop && m.drop.d >= 120 ? ` · от маршрута до места ${meters(m.drop.d)}` : ""}</div>
+        </div>
+      </div>
+      <div class="facts"><span>в пути <b>~${minutes(m.g.durSec)}</b></span><span>${meters(m.g.total)}</span>${m.g.trafficSec ? `<span class="traffic">сейчас с пробками ${minutes(m.g.trafficSec)}</span>` : ""}</div>
+    </div>
+    <h3>Водители · ${dayLabel(state.day).toLowerCase()}</h3>
+    <div id="dlist">${drivers.length ? "" : '<div class="empty">На этот день рейсов больше нет. Выберите другой день.</div>'}</div>`;
+  const back = $("#allroutes");
+  if (back) back.onclick = () => { state.routeId = null; renderResults(); updateSearchMap(); };
+  const list = $("#dlist");
+  drivers.forEach(({ trip, at }) => {
+    const d = trip.driver;
+    const row = document.createElement("button");
+    row.className = "driver-row" + (trip.free ? "" : " full");
+    row.disabled = !trip.free;
+    row.style.setProperty("--c", m.route.color);
+    row.innerHTML = `
+      <div class="avatar">${esc(d.name[0])}</div>
+      <div class="info">
+        <div><strong>${esc(d.name)}</strong> <span class="small">★ ${d.rating}</span>${d.verified ? ' <span class="verified">✓</span>' : ""}</div>
+        <div class="small muted">${esc(d.car)}, ${esc(d.color)}</div>
+        <div class="small ${trip.free ? "seats-ok" : "seats-no"}">${trip.free ? `свободно ${trip.free} ${plural(trip.free, "место", "места", "мест")}` : "мест нет"}</div>
+      </div>
+      <div class="when">
+        <div class="tm">${hhmm(at)}</div>
+        ${trip.free ? `<div class="small">от ${amd(trip.minPrice)}</div>` : ""}
+      </div>`;
+    row.onclick = () => renderCar(m, trip);
+    list.appendChild(row);
+  });
 }
 
 function bindInput(which) {
@@ -418,65 +567,7 @@ function locateMe() {
   }, () => toast("Не удалось определить местоположение. Выберите точку на карте."), { timeout: 8000 });
 }
 
-function routeFacts(r, g) {
-  const parts = [`<span>в пути <b>~${minutes(g.durSec)}</b></span>`, `<span>${meters(g.total)}</span>`];
-  if (g.trafficSec) parts.push(`<span class="traffic">сейчас с пробками ${minutes(g.trafficSec)}</span>`);
-  return parts.join("");
-}
-
-function renderResults() {
-  const list = searchRoutes();
-  clearMapFocus();
-  view.innerHTML = `
-    <button class="link back" id="back">← Изменить поиск</button>
-    <h2>${list.length ? `Маршруты рядом: ${list.length}` : "Маршрутов рядом нет"}</h2>
-    <div class="timeline" style="margin-bottom:12px">
-      <span class="dot from"></span><span>${esc(state.from.name)}</span><span></span>
-      <span class="dot to"></span><span>${state.to ? esc(state.to.name) : '<span class="muted">любое направление</span>'}</span><span></span>
-    </div>
-    ${list.length ? "" : `<div class="empty">Рядом с этой точкой нет маршрутов${state.to ? " в нужную сторону" : ""}. Попробуйте точку ближе к линиям на карте или откройте «Маршруты».</div>`}
-    <div id="list"></div>`;
-  $("#back").onclick = renderSearch;
-  const box = $("#list");
-  const coordsToFit = [state.from.coords];
-  if (state.to) coordsToFit.push(state.to.coords);
-  list.forEach(r => {
-    const deps = departuresFor(r);
-    const card = document.createElement("div");
-    card.className = "route-card";
-    card.style.setProperty("--c", r.route.color);
-    const walk = r.pick.d < 120 ? "маршрут начинается рядом" : `до маршрута ${meters(r.pick.d)} пешком`;
-    card.innerHTML = `
-      <div class="route-head">
-        <span class="code">${r.route.id}</span>
-        <div>
-          <div class="route-title">${esc(r.route.from.name)} → ${esc(r.route.to.name)}</div>
-          <div class="small muted">${walk}</div>
-        </div>
-        <span class="price">${amd(r.route.price)}</span>
-      </div>
-      <div class="facts">${routeFacts(r.route, r.g)}</div>
-      <div class="deps">${deps.length ? deps.map((x, i) => {
-        const free = x.trip.total - x.trip.taken;
-        return `<button class="dep ${free ? "" : "full"}" data-i="${i}" ${free ? "" : "disabled"}><span class="t">${hhmm(x.at)}</span><span class="s">${free ? `мест: ${free}` : "мест нет"}</span></button>`;
-      }).join("") : '<span class="small muted">На этот день рейсов больше нет</span>'}</div>`;
-    card.querySelectorAll(".dep[data-i]").forEach(b => b.onclick = () => renderTrip(r, deps[+b.dataset.i].trip));
-    card.addEventListener("mouseenter", () => focusRoute(r.route.id));
-    card.addEventListener("mouseleave", () => focusRoute(null));
-    box.appendChild(card);
-    coordsToFit.push(...r.g.coords);
-  });
-  fit(coordsToFit);
-}
-
-function money(price, seats) {
-  const total = price * seats;
-  const fee = total * D.commissionPercent / 100;
-  const duty = total * D.statePercent / 100;
-  return { total, fee, duty, driver: total - fee - duty };
-}
 const initials = name => name.slice(0, 1).toUpperCase();
-
 function driverCard(trip) {
   const d = trip.driver;
   return `<div class="driver" style="--c:${trip.route.color}">
@@ -489,70 +580,80 @@ function driverCard(trip) {
   </div>`;
 }
 
-function renderTrip(r, trip, seats = 1) {
-  const g = r.g;
-  const free = trip.total - trip.taken;
-  seats = Math.max(1, Math.min(seats, free, 4));
-  const dropAlong = r.drop ? r.drop.along : g.total;
-  const pickAt = timeAt(trip, r.pick.along), dropAt = timeAt(trip, dropAlong);
-  const seg = subLine(g, r.pick.along, dropAlong);
-  focusRoute(r.route.id);
-  setSegment(seg, r.route.color);
-  setPickup(pointAt(g, r.pick.along));
-  fit([...seg, state.from.coords]);
-  const m = money(r.route.price, seats);
-  view.innerHTML = `
-    <button class="link back" id="back">← К маршрутам</button>
-    <h2>${esc(r.route.from.name)} → ${esc(r.route.to.name)}</h2>
-    <div class="timeline">
-      <span class="dot from"></span><span>Посадка рядом с вами${r.pick.d >= 120 ? ` · ${meters(r.pick.d)} пешком` : ""}</span><span class="tm">≈ ${hhmm(pickAt)}</span>
-      <span class="dot to"></span><span>${r.drop ? `Высадка рядом с «${esc(state.to.name)}»` : esc(r.route.to.name)}</span><span class="tm">≈ ${hhmm(dropAt)}</span>
+// Схема салона: водитель и переднее место, сзади 2 или 3 места
+function seatPlan(trip, selected) {
+  const s = id => trip.seats.find(x => x.id === id);
+  const btn = seat => {
+    if (!seat) return "";
+    const on = selected.includes(seat.id);
+    return `<button class="seat ${seat.taken ? "taken" : ""} ${on ? "on" : ""}" data-seat="${seat.id}" ${seat.taken ? "disabled" : ""} aria-pressed="${on}">
+      <span class="seat-name">${esc(seat.label)}</span>
+      <span class="seat-price">${seat.taken ? "занято" : amd(seat.price)}</span>
+    </button>`;
+  };
+  const rear = ["rl", "rm", "rr"].map(s).filter(Boolean);
+  return `<div class="car-plan">
+    <div class="car-nose"></div>
+    <div class="car-row">
+      <div class="seat driver-seat"><span class="wheel">⎈</span><span class="seat-name">Водитель</span></div>
+      ${btn(s("front"))}
     </div>
-    <p class="tiny muted">Водитель выезжает из точки «${esc(r.route.from.name)}» в ${hhmm(trip.dep)}${g.trafficSec ? ". Время посадки посчитано с учётом сегодняшних пробок" : ""}.</p>
-    ${driverCard(trip)}
-    <div class="note">Где именно вас подобрать и высадить, договоритесь с водителем: его телефон появится в брони в день поездки.</div>
-    ${free > 0 ? `
-      <h3>Сколько мест?</h3>
-      <div class="stepper"><button id="minus" aria-label="Меньше">−</button><strong>${seats}</strong><button id="plus" aria-label="Больше">+</button><span class="muted small">свободно ${free}</span></div>
-      <div class="breakdown">
-        <div class="row"><span>${seats} × ${amd(r.route.price)}</span><strong>${amd(m.total)}</strong></div>
-        <div class="row muted"><span>Водителю</span><span>${amd(m.driver)}</span></div>
-        <div class="row muted"><span>Комиссия сервиса ${D.commissionPercent}%</span><span>${amd(m.fee)}</span></div>
-        <div class="row muted"><span>Госпошлина ${D.statePercent}%</span><span>${amd(m.duty)}</span></div>
-        <div class="tiny muted" style="margin-top:6px">Разбивка видна только в прототипе. Комиссия 10% — пример.</div>
-      </div>
-      <button class="btn" id="pay">Оплатить картой ${amd(m.total)}</button>
-      <p class="muted tiny" style="text-align:center">Бесплатная отмена — не позднее чем за 60 минут до посадки</p>`
-      : `<div class="empty">На этот рейс мест нет.</div>`}`;
-  $("#back").onclick = renderResults;
-  if (free > 0) {
-    $("#minus").onclick = () => renderTrip(r, trip, seats - 1);
-    $("#plus").onclick = () => renderTrip(r, trip, seats + 1);
-    $("#pay").onclick = () => payDemo(r, trip, seats, m.total);
-  }
+    <div class="car-row r${rear.length}">${rear.map(btn).join("")}</div>
+  </div>`;
 }
 
-function payDemo(r, trip, seats, total) {
+function renderCar(m, trip, selected = []) {
+  const g = m.g;
+  const dropAlong = m.drop ? m.drop.along : g.total;
+  const pickAt = timeAt(trip, m.pick.along), dropAt = timeAt(trip, dropAlong);
+  const total = selected.reduce((sum, id) => sum + trip.seats.find(x => x.id === id).price, 0);
+  view.innerHTML = `
+    <button class="link back" id="back">← К водителям</button>
+    ${driverCard(trip)}
+    <div class="timeline">
+      <span class="dot from"></span><span>Посадка рядом с вами${m.pick.d >= 120 ? ` · ${meters(m.pick.d)} пешком` : ""}</span><span class="tm">≈ ${hhmm(pickAt)}</span>
+      <span class="dot to"></span><span>${m.drop ? `Высадка рядом с «${esc(state.to.name)}»` : esc(m.route.to.name)}</span><span class="tm">≈ ${hhmm(dropAt)}</span>
+    </div>
+    <h3>Выберите места</h3>
+    ${seatPlan(trip, selected)}
+    <div class="note">Где именно вас подобрать и высадить, договоритесь с водителем: его телефон появится в брони в день поездки.</div>
+    <div class="paybar">
+      <div><div class="tiny muted">${selected.length ? selected.map(id => trip.seats.find(x => x.id === id).label).join(", ") : "Места не выбраны"}</div><div class="total">${amd(total)}</div></div>
+      <button class="btn" id="pay" ${selected.length ? "" : "disabled"}>Оплатить картой</button>
+    </div>
+    <p class="muted tiny" style="text-align:center">Бесплатная отмена — не позднее чем за 60 минут до посадки</p>`;
+  $("#back").onclick = () => { renderSearch(); updateSearchMap(); };
+  view.querySelectorAll(".seat[data-seat]").forEach(b => b.onclick = () => {
+    const id = b.dataset.seat;
+    const next = selected.includes(id) ? selected.filter(x => x !== id) : [...selected, id];
+    renderCar(m, trip, next);
+  });
+  if (selected.length) $("#pay").onclick = () => payDemo(m, trip, selected, total);
+}
+
+function payDemo(m, trip, seatIds, total) {
   modal(`
     <h2>Оплата картой</h2>
-    <p>Это демо: деньги не списываются.</p>
-    <p class="muted small">В рабочей версии здесь откроется защищённая страница банка для карт ArCa, Visa и Mastercard. Приложение не хранит данные карты.</p>
     <p>К оплате: <strong>${amd(total)}</strong></p>
+    <p class="muted small">Это демо: деньги не списываются. В рабочей версии здесь откроется защищённая страница банка для карт ArCa, Visa и Mastercard.</p>
     <button class="btn" id="confirm">Подтвердить демо-оплату</button>
     <button class="btn secondary" id="cancel">Отмена</button>`);
   $("#cancel").onclick = closeModal;
   $("#confirm").onclick = () => {
     const b = {
       id: "B" + Date.now().toString(36).toUpperCase(),
-      tripId: trip.id, routeId: r.route.id,
-      pickAlong: r.pick.along, dropAlong: r.drop ? r.drop.along : r.g.total,
-      fromName: state.from.name, toName: state.to ? state.to.name : r.route.to.name,
-      seats, amount: total, status: "paid", rating: null
+      tripId: trip.id, routeId: m.route.id,
+      pickAlong: m.pick.along, dropAlong: m.drop ? m.drop.along : m.g.total,
+      fromName: state.from.name, toName: state.to ? state.to.name : m.route.to.name,
+      seatIds, seatLabels: seatIds.map(id => trip.seats.find(x => x.id === id).label),
+      amount: total, status: "paid", rating: null
     };
     state.bookings.unshift(b);
     saveBookings();
     closeModal();
-    toast("Оплата прошла (демо). Место забронировано.");
+    toast("Оплата прошла (демо). Места забронированы.");
+    state.tab = "mine";
+    document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("active", x.dataset.tab === "mine"));
     renderTicket(b);
   };
 }
@@ -571,10 +672,11 @@ function renderTicket(b) {
   if (!g) { view.innerHTML = '<div class="empty">Загрузка карты…</div>'; ready.then(() => renderTicket(b)); return; }
   const pickAt = timeAt(trip, b.pickAlong), dropAt = timeAt(trip, b.dropAlong);
   const seg = subLine(g, b.pickAlong, b.dropAlong);
-  focusRoute(b.routeId);
+  clearMap();
+  showLines([b.routeId]);
   setSegment(seg, trip.route.color);
   setPickup(pointAt(g, b.pickAlong));
-  fit(seg);
+  fit(g.coords);
   const minsLeft = (pickAt - Date.now()) / 60000;
   const dayOff = Math.round((new Date(trip.dep).setHours(0, 0, 0, 0) - dayStart(0).getTime()) / 864e5);
   view.innerHTML = `
@@ -584,10 +686,10 @@ function renderTicket(b) {
       <span class="dot from"></span><span>${esc(b.fromName)}</span><span class="tm">≈ ${hhmm(pickAt)}</span>
       <span class="dot to"></span><span>${esc(b.toName)}</span><span class="tm">≈ ${hhmm(dropAt)}</span>
     </div>
-    <p class="small muted">${dayLabel(dayOff)} · маршрут ${trip.route.id} · мест: ${b.seats} · ${amd(b.amount)}</p>
+    <p class="small muted">${dayLabel(dayOff)} · ${esc(b.seatLabels.join(", "))} · <b style="color:var(--text)">${amd(b.amount)}</b></p>
     ${driverCard(trip)}
     ${b.status === "paid" ? `
-      <div class="note">Телефон водителя: появится в день поездки (в прототипе не показывается).</div>
+      <div class="note">Телефон водителя появится в день поездки (в прототипе не показывается).</div>
       <button class="btn" id="track">Следить за машиной</button>
       <button class="btn danger" id="cancelb">Отменить бронь</button>
       <p class="muted tiny" style="text-align:center">${minsLeft >= 60 ? "Сейчас отмена бесплатная — деньги вернутся на карту." : "До посадки меньше 60 минут — при отмене деньги не возвращаются."}</p>` : ""}
@@ -605,7 +707,7 @@ function cancelBooking(b, minsLeft) {
   const free = minsLeft >= 60;
   modal(`
     <h2>Отменить бронь?</h2>
-    <p>${free ? `Вернём ${amd(b.amount)} на карту.` : "До посадки меньше 60 минут. Деньги не вернутся — водитель получит свою долю."}</p>
+    <p>${free ? `Вернём ${amd(b.amount)} на карту.` : "До посадки меньше 60 минут. Деньги не вернутся."}</p>
     <button class="btn danger" id="yes">Отменить бронь</button>
     <button class="btn secondary" id="no">Не отменять</button>`);
   $("#no").onclick = closeModal;
@@ -633,13 +735,8 @@ function bindRate(b) {
   });
 }
 
-function showRoute(route) {
-  focusRoute(route.id);
-  if (geoms[route.id]) fit(geoms[route.id].coords);
-}
-
 function renderRoutes() {
-  view.innerHTML = `<h2>Маршруты</h2><p class="muted small">Маршрут — это начальная и конечная точки. Где подсесть по пути, пассажир договаривается с водителем. Цены — демо.</p><div id="list"></div>`;
+  view.innerHTML = `<h2>Все маршруты</h2><p class="muted small">Маршрут — это начальная и конечная точки. Где подсесть по пути, пассажир договаривается с водителем.</p><div id="list"></div>`;
   const box = $("#list");
   D.routes.forEach(route => {
     const g = geoms[route.id];
@@ -648,24 +745,27 @@ function renderRoutes() {
     card.style.setProperty("--c", route.color);
     card.innerHTML = `
       <div class="route-head">
-        <span class="code">${route.id}</span>
+        <span class="swatch"></span>
         <div class="ends"><span class="dot from"></span><span>${esc(route.from.name)}</span><span class="dot to"></span><span>${esc(route.to.name)}</span></div>
-        <span class="price">${amd(route.price)}</span>
       </div>
-      <div class="facts">${g ? routeFacts(route, g) : '<span>загрузка…</span>'}</div>
+      <div class="facts">${g ? `<span>в пути <b>~${minutes(g.durSec)}</b></span><span>${meters(g.total)}</span>${g.trafficSec ? `<span class="traffic">сейчас с пробками ${minutes(g.trafficSec)}</span>` : ""}` : "<span>загрузка…</span>"}</div>
       <div class="quick">
-        <button class="pill" data-a="from">Ехать отсюда</button>
+        <button class="pill" data-a="go">Ехать по этому маршруту</button>
         <button class="pill" data-a="sim">Показать движение машины</button>
       </div>`;
     card.addEventListener("click", e => {
       const a = e.target.closest("[data-a]");
-      if (!a) { showRoute(route); return; }
-      if (a.dataset.a === "from") { setPlace("from", { ...route.from }); state.to = null; if (map) setPointMarker("to"); switchTab("search"); ready.then(renderResults); }
+      if (!a) { if (g) { showLines([route.id]); fit(g.coords); } return; }
+      if (a.dataset.a === "go") {
+        state.from = { ...route.from };
+        state.to = { ...route.to };
+        state.routeId = null;
+        switchTab("search");
+      }
       if (a.dataset.a === "sim") ready.then(() => startSim({ ...tripsFor(route, 0)[0], dep: new Date() }, null));
     });
     box.appendChild(card);
   });
-  ready.then(() => { if (state.tab === "routes") fitAll(); });
 }
 
 function renderMine() {
@@ -682,7 +782,7 @@ function renderMine() {
     card.innerHTML = trip ? `
       <div class="row"><strong>${hhmm(at)} · ${at.toLocaleDateString("ru-RU", { day: "numeric", month: "long" })}</strong>${statusBadge(b)}</div>
       <div class="small">${esc(b.fromName)} → ${esc(b.toName)}</div>
-      <div class="tiny muted">Маршрут ${b.routeId} · мест: ${b.seats} · ${amd(b.amount)}</div>`
+      <div class="tiny muted">${esc(trip.driver.name)}, ${esc(trip.driver.car)} · ${esc(b.seatLabels.join(", "))} · ${amd(b.amount)}</div>`
       : `<div class="small muted">Бронь ${esc(b.id)}: рейс вне расписания</div>`;
     card.onclick = () => renderTicket(b);
     box.appendChild(card);
@@ -702,11 +802,11 @@ function startSim(trip, booking) {
   const route = trip.route, g = geoms[route.id];
   const speed = g.total / (g.trafficSec || g.durSec); // м/с
   const car = new ymaps.Placemark(g.coords[0], { hintContent: `${trip.driver.car}, ${trip.driver.plate}` }, { preset: "islands#autoCircleIcon", iconColor: route.color });
+  clearMap();
+  showLines([route.id]);
   map.geoObjects.add(car);
   state.sim = { trip, booking, pos: 0, speed, factor: 10, car, last: performance.now(), raf: 0, boarded: false, g, route };
-  focusRoute(route.id);
   if (booking) { setSegment(subLine(g, booking.pickAlong, booking.dropAlong), route.color); setPickup(pointAt(g, booking.pickAlong)); }
-  else { setSegment(null); setPickup(null); }
   fit(g.coords);
 
   view.innerHTML = `
