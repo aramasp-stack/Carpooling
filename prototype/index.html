@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>TransportApp — прототип</title>
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="map"></div>
+
+  <aside id="panel">
+    <header class="brand">
+      <span class="logo">TransportApp</span>
+      <span class="badge">прототип</span>
+    </header>
+    <nav class="tabs" role="tablist">
+      <button data-tab="search" class="active">Поиск</button>
+      <button data-tab="routes">Маршруты</button>
+      <button data-tab="mine">Мои поездки</button>
+    </nav>
+    <section id="view"></section>
+  </aside>
+
+  <div id="modal" hidden>
+    <div class="modal-card" id="modal-card"></div>
+  </div>
+  <div id="toast" hidden></div>
+
+  <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
