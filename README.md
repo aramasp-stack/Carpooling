@@ -25,9 +25,11 @@
 
 Нужны Flutter, Android SDK и JDK 21 (её требует модуль Яндекс MapKit; указать Flutter: `flutter config --jdk-dir <папка JDK 21>`). Ключ «MapKit – мобильный SDK» из [кабинета разработчика Яндекса](https://developer.tech.yandex.ru/) передаётся при сборке; без ключа приложение работает, но вместо карты показывается заглушка.
 
+Ключ хранится в файле `mapkit.json` в корне проекта; git его не сохраняет. Скопируйте `mapkit.example.json` в `mapkit.json` и впишите ключ, затем:
+
 ```bash
 cd apps/passenger
-flutter run --dart-define=MAPKIT_API_KEY=ваш-ключ
+flutter run --dart-define-from-file=../../mapkit.json
 ```
 
 Проверка ядра:
