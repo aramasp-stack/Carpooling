@@ -168,7 +168,7 @@ extension SearchPanel on HomeState {
         minLeadingWidth: 12,
         title: Text(m.route.title, style: const TextStyle(fontWeight: FontWeight.w600)),
         subtitle: Text('${_walk(m)} · в пути ~${minutesText(m.geometry.durationSec)}\n'
-            '${n > 0 ? '$n ${plural(n, 'водитель', 'водителя', 'водителей')} · ${dayLabel(day).toLowerCase()}' : 'свободных мест нет'}'),
+            '${n > 0 ? '$n ${plural(n, 'рейс', 'рейса', 'рейсов')} со свободными местами · ${dayLabel(day).toLowerCase()}' : 'свободных мест нет'}'),
         isThreeLine: true,
         trailing: const Icon(Icons.chevron_right),
         onTap: () {
@@ -191,12 +191,13 @@ extension SearchPanel on HomeState {
       Container(
         margin: const EdgeInsets.only(top: 6),
         padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          border: Border(left: BorderSide(color: Color(m.route.color), width: 4), top: const BorderSide(color: AppColors.line), right: const BorderSide(color: AppColors.line), bottom: const BorderSide(color: AppColors.line)),
-          borderRadius: BorderRadius.circular(14),
-        ),
+        decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(m.route.title, style: const TextStyle(fontWeight: FontWeight.w700)),
+          Row(children: [
+            Swatch(Color(m.route.color)),
+            const SizedBox(width: 8),
+            Expanded(child: Text(m.route.title, style: const TextStyle(fontWeight: FontWeight.w700))),
+          ]),
           const SizedBox(height: 2),
           Text(
             '${m.pick.distance < 120 ? 'маршрут начинается рядом' : 'до маршрута ${meters(m.pick.distance)} пешком'}'

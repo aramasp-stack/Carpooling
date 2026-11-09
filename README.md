@@ -5,7 +5,39 @@
 Как у Яндекса (Яндекс Go и Яндекс Про), приложений два: для пассажира и для водителя.
 
 - Техническое задание: [docs/TZ.md](docs/TZ.md) (рабочая версия — в Claude Docs).
-- Прототип (этап 1 ТЗ): папка [prototype](prototype).
+- Мобильные приложения (Flutter, Android и iOS): папки [apps](apps) и [packages](packages).
+- Веб-прототип (этап 1 ТЗ): папка [prototype](prototype).
+
+## Мобильные приложения
+
+Один код на Flutter для Android и iPhone. Карта — официальный [Яндекс MapKit для Flutter](https://yandex.ru/maps-api/docs/mapkit/flutter/generated/getting_started.html).
+
+| Папка | Что это |
+| --- | --- |
+| `apps/passenger` | Приложение пассажира |
+| `apps/driver` | Приложение водителя (демо-водитель — Арам) |
+| `packages/core` | Общее ядро на Dart: маршруты, расписание, места, брони, деньги, поиск; тесты |
+| `packages/ui` | Общий интерфейс: Яндекс Карта с пробками, схема салона, карточки |
+
+Пока нет сервера, каждое приложение хранит данные на своём телефоне; общими между телефонами они станут после подключения Supabase.
+
+### Сборка и запуск (Windows)
+
+Нужны Flutter, Android SDK и JDK 21 (её требует модуль Яндекс MapKit; указать Flutter: `flutter config --jdk-dir <папка JDK 21>`). Ключ «MapKit – мобильный SDK» из [кабинета разработчика Яндекса](https://developer.tech.yandex.ru/) передаётся при сборке; без ключа приложение работает, но вместо карты показывается заглушка.
+
+```bash
+cd apps/passenger
+flutter run --dart-define=MAPKIT_API_KEY=ваш-ключ
+```
+
+Проверка ядра:
+
+```bash
+cd packages/core
+dart test
+```
+
+Сборка для iPhone возможна только на Mac — для этого используем облачную сборку (Codemagic) и аккаунт Apple Developer.
 
 ## Прототип
 
