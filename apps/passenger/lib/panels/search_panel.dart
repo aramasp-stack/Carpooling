@@ -167,7 +167,7 @@ extension SearchPanel on HomeState {
         leading: Swatch(Color(m.route.color)),
         minLeadingWidth: 12,
         title: Text(m.route.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text('${_walk(m)} · в пути ~${minutesText(m.geometry.durationSec)}\n'
+        subtitle: Text('${_walk(m)} · в пути ~${minutesText(m.geometry.trafficSec ?? m.geometry.durationSec)}\n'
             '${n > 0 ? '$n ${plural(n, 'рейс', 'рейса', 'рейсов')} со свободными местами · ${dayLabel(day).toLowerCase()}' : 'свободных мест нет'}'),
         isThreeLine: true,
         trailing: const Icon(Icons.chevron_right),
@@ -206,7 +206,7 @@ extension SearchPanel on HomeState {
           ),
           const SizedBox(height: 6),
           Wrap(spacing: 12, children: [
-            Text('в пути ~${minutesText(g.durationSec)}', style: const TextStyle(fontSize: 13)),
+            Text('${g.trafficSec != null ? 'обычно' : 'в пути'} ~${minutesText(g.durationSec)}', style: const TextStyle(fontSize: 13)),
             Text(meters(g.length), style: const TextStyle(fontSize: 13, color: AppColors.muted)),
             if (g.trafficSec != null)
               Text('сейчас с пробками ${minutesText(g.trafficSec!)}', style: const TextStyle(fontSize: 13, color: AppColors.traffic)),

@@ -27,7 +27,7 @@ extension RoutesPanel on HomeState {
           const SizedBox(height: 6),
           Wrap(spacing: 12, children: [
             if (g != null) ...[
-              Text('в пути ~${minutesText(g.durationSec)}', style: const TextStyle(fontSize: 13)),
+              Text('${g.trafficSec != null ? 'обычно' : 'в пути'} ~${minutesText(g.durationSec)}', style: const TextStyle(fontSize: 13)),
               Text(meters(g.length), style: const TextStyle(fontSize: 13, color: AppColors.muted)),
               if (g.trafficSec != null)
                 Text('сейчас с пробками ${minutesText(g.trafficSec!)}', style: const TextStyle(fontSize: 13, color: AppColors.traffic)),

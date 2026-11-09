@@ -175,6 +175,8 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     _renderRoutes();
     _renderMarkers();
     _renderCar();
+    // Ереван целиком в видимой части карты (над нижней панелью).
+    _fit(const [GeoPoint(40.12, 44.43), GeoPoint(40.23, 44.60)]);
   }
 
   // ---------- отрисовка ----------
