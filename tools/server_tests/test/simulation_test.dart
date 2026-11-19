@@ -21,7 +21,7 @@ void main() {
     addTearDown(w.close);
 
     final routes = [
-      for (var i = 0; i < 6; i++) await w.newRoute('S$i', price: 300 + 100 * rnd.nextInt(8), minutes: 8 + rnd.nextInt(25), length: 2000 + rnd.nextInt(9000)),
+      for (var i = 0; i < 6; i++) await w.newRoute('S$i', price: 300 + 100 * rnd.nextInt(8), minPrice: 300, minutes: 8 + rnd.nextInt(25), length: 2000 + rnd.nextInt(9000)),
     ];
     final drivers = [for (var i = 0; i < 10; i++) await w.newDriver('Водитель $i', seats: i.isEven ? 4 : 3)];
     final passengers = [

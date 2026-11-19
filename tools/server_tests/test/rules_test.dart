@@ -231,6 +231,50 @@ void main() {
     expect((await driver.one('select driver_earnings()') as Map)['accrued'], 0);
   });
 
+  test('цены мест ставит водитель, но не ниже минимальной цены маршрута', () async {
+    const save = 'select staff_save_route(@id::uuid, @c, @fn, 40.2264, 44.4930, @tn, 40.1777, 44.5126, @p::int, 25, 9000, 4283388645, @mn::int)';
+    Map<String, Object?> a(String? id, String code, int price, int? min) =>
+        {'id': id, 'c': code, 'fn': 'Аван', 'tn': 'Опера', 'p': '$price', 'mn': min == null ? null : '$min'};
+    Future<int> minOf(String r) async => await w.scalar('select min_price from routes where id = @r::uuid', {'r': r}) as int;
+
+    // Модератор: минимум — от 1 до базовой цены; не указан — равен базовой цене.
+    expect(await w.moderator.refusal(save, a(null, 'MIN0', 500, 0)), 'BAD_ARGUMENT');
+    expect(await w.moderator.refusal(save, a(null, 'MIN0', 500, 501)), 'BAD_ARGUMENT', reason: 'минимум выше базовой цены');
+    final plain = await w.moderator.one(save, a(null, 'MIN1', 700, null)) as String;
+    expect(await minOf(plain), 700);
+    final r = await w.newRoute('MIN2', price: 500, minPrice: 400);
+    expect(await minOf(r), 400);
+
+    // Водитель: ниже минимума нельзя ни одно место; ровно минимум и выше (до трёх базовых цен) — можно.
+    final driver = await w.newDriver('Щедрый');
+    Future<String?> refused(Map<String, int> seats, {int inMin = 60}) async {
+      try {
+        await driver.createTrip(r, await inMinutes(inMin), seats: seats);
+        return null;
+      } on Refused catch (e) {
+        return e.code;
+      }
+    }
+
+    expect(await refused({'front': 399}), 'PRICE_BELOW_MINIMUM');
+    expect(await refused({'front': 600, 'rl': 500, 'rr': 1}), 'PRICE_BELOW_MINIMUM', reason: 'хватает одного дешёвого места');
+    expect(await refused({'front': 1501}), 'BAD_PRICE', reason: 'дороже трёх базовых цен');
+    final trip = await driver.createTrip(r, await inMinutes(60), seats: {'front': 1500, 'rl': 400});
+    final pass = await w.newPassenger('За минимум');
+    expect((await pass.book(trip, ['rl']))['amount'], 400);
+
+    // Модератор поднял минимум: уже выставленные места не меняются, новые рейсы — по новому минимуму.
+    await w.moderator.q(save, a(r, 'MIN2', 500, 500));
+    expect(await w.scalar("select price from trip_seats where trip_id = @t::uuid and seat_id = 'rl'", {'t': trip}), 400);
+    expect(await refused({'front': 450}, inMin: 300), 'PRICE_BELOW_MINIMUM');
+    expect(await refused({'front': 500}, inMin: 300), isNull);
+    // Базовую цену опустили ниже минимума, не указав новый минимум: минимум опускается вместе с ней.
+    await w.moderator.q(save, a(r, 'MIN2', 450, null));
+    expect(await minOf(r), 450);
+    // Изменения минимума записаны в журнал действий.
+    expect(await w.scalar("select count(*)::int from audit_log where action = 'save_route' and entity_id = @r", {'r': r}), 3);
+  });
+
   test('жалоба: поддержка возвращает деньги после рейса, пока доля водителя не начислена', () async {
     final driver = await w.newDriver('Спорный');
     final pass = await w.newPassenger('Недовольный');

@@ -1,0 +1,339 @@
+<title>Схема виртуальной модели</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600&family=Manrope:wght@700;800&family=JetBrains+Mono:wght@500&display=swap">
+<style>
+  /* Раскладка: сверху вниз идут «этажи» системы — люди, их программы, сервер, внешние службы.
+     Каждый человек стоит над своей программой; все программы сходятся в один сервер. */
+  :root {
+    --bg: #F2F4F8; --surface: #FFFFFF; --sunk: #E9EDF3;
+    --ink: #16202E; --muted: #586478; --line: #D3DAE5;
+    --accent: #E8862E; --accent-ink: #9C4E0C;
+    --pass: #2F6FDE; --drv: #E8862E; --staff: #7A56C2;
+    --real: #1C7F54; --sim: #9A6510; --later: #6B7688;
+    --real-bg: #E1F3EA; --sim-bg: #FBEFD8; --later-bg: #E9EDF3;
+    --display: "Manrope", "Segoe UI", system-ui, sans-serif;
+    --body: "Golos Text", "Segoe UI", system-ui, sans-serif;
+    --mono: "JetBrains Mono", ui-monospace, Consolas, monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #0F141C; --surface: #18202B; --sunk: #121923;
+      --ink: #E7ECF3; --muted: #9BA7B9; --line: #2C3746;
+      --accent: #F2A257; --accent-ink: #F2A257;
+      --pass: #7FA8F5; --drv: #F2A257; --staff: #B39AE8;
+      --real: #62CB9B; --sim: #E3B45E; --later: #94A0B2;
+      --real-bg: #16302A; --sim-bg: #33290F; --later-bg: #222C39;
+      color-scheme: dark;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #0F141C; --surface: #18202B; --sunk: #121923;
+    --ink: #E7ECF3; --muted: #9BA7B9; --line: #2C3746;
+    --accent: #F2A257; --accent-ink: #F2A257;
+    --pass: #7FA8F5; --drv: #F2A257; --staff: #B39AE8;
+    --real: #62CB9B; --sim: #E3B45E; --later: #94A0B2;
+    --real-bg: #16302A; --sim-bg: #33290F; --later-bg: #222C39;
+    color-scheme: dark;
+  }
+
+  body { background: var(--bg); color: var(--ink); font: 400 15px/1.5 var(--body); }
+  .page {
+    max-width: 1080px; margin: 0 auto; padding-block: 28px 56px;
+    padding-left: max(16px, env(safe-area-inset-left, 0px));
+    padding-right: max(16px, env(safe-area-inset-right, 0px));
+    display: flex; flex-direction: column; gap: 44px;
+  }
+  h1, h2, h3 { font-family: var(--display); text-wrap: balance; margin: 0; }
+  h1 { font-size: clamp(26px, 5vw, 38px); font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
+  h2 { font-size: 22px; font-weight: 800; letter-spacing: -0.01em; }
+  h3 { font-size: 15px; font-weight: 700; }
+  p { margin: 0; }
+  .lead { max-width: 62ch; color: var(--muted); font-size: 16px; }
+  .eyebrow { font: 600 12px/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--accent-ink); }
+  header { display: flex; flex-direction: column; gap: 12px; }
+  section { display: flex; flex-direction: column; gap: 16px; }
+  .note { color: var(--muted); max-width: 70ch; }
+
+  /* метки состояния */
+  .tag { display: inline-block; font: 600 11px/1 var(--body); letter-spacing: 0.04em; padding: 5px 8px; border-radius: 999px; white-space: nowrap; }
+  .tag.real { background: var(--real-bg); color: var(--real); }
+  .tag.sim { background: var(--sim-bg); color: var(--sim); outline: 1px dashed var(--sim); outline-offset: -1px; }
+  .tag.later { background: var(--later-bg); color: var(--later); }
+  .legend { display: flex; flex-wrap: wrap; gap: 8px 18px; color: var(--muted); font-size: 13px; }
+  .legend span { display: inline-flex; align-items: center; gap: 8px; }
+
+  /* схема */
+  .tier-name { font: 600 12px/1 var(--body); letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+  .lanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+  .lane { display: flex; flex-direction: column; min-width: 0; }
+  .who { border-radius: 12px 12px 0 0; padding: 12px 14px; background: var(--sunk); border: 1px solid var(--line); border-bottom: 0; display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .who b { font-family: var(--display); font-size: 16px; }
+  .who small { color: var(--muted); font-size: 13px; }
+  .dot { width: 10px; height: 10px; border-radius: 50%; flex: none; align-self: center; }
+  .lane.pass .dot { background: var(--pass); } .lane.drv .dot { background: var(--drv); } .lane.staff .dot { background: var(--staff); }
+  .app { flex: 1; background: var(--surface); border: 1px solid var(--line); border-radius: 0 0 12px 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+  .lane.pass .app { border-top: 3px solid var(--pass); } .lane.drv .app { border-top: 3px solid var(--drv); } .lane.staff .app { border-top: 3px solid var(--staff); }
+  .app-head { display: flex; justify-content: space-between; gap: 8px; align-items: flex-start; flex-wrap: wrap; }
+  ul.plain { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 5px; font-size: 14px; }
+  ul.plain li { padding-left: 14px; position: relative; }
+  ul.plain li::before { content: ""; position: absolute; left: 0; top: 0.62em; width: 6px; height: 1px; background: var(--muted); }
+  .state { font-size: 13px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 9px; margin-top: auto; }
+
+  .pipe { display: flex; align-items: center; gap: 12px; padding-left: 22px; }
+  .pipe i { width: 2px; align-self: stretch; min-height: 46px; background: var(--line); position: relative; flex: none; }
+  .pipe i::after { content: ""; position: absolute; left: -4px; bottom: 0; border: 5px solid transparent; border-top-color: var(--muted); border-bottom: 0; }
+  .pipe p { font-size: 14px; color: var(--muted); max-width: 64ch; }
+  .pipe p b { color: var(--ink); font-weight: 600; }
+
+  .core { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 300px); gap: 14px; align-items: stretch; }
+  .server { background: var(--surface); border: 2px solid var(--ink); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+  .server-head { display: flex; justify-content: space-between; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+  .server-head b { font-family: var(--display); font-size: 18px; font-weight: 800; }
+  .parts { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; }
+  .part { background: var(--sunk); border-radius: 10px; padding: 12px; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+  .part p { font-size: 13.5px; color: var(--muted); }
+  .part .n { font: 500 12px/1 var(--mono); color: var(--accent-ink); }
+  .bench { border: 1px dashed var(--muted); border-radius: 14px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+  .bench .arrow { font: 600 12px/1.3 var(--body); color: var(--muted); letter-spacing: 0.04em; text-transform: uppercase; }
+
+  .ext { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; }
+  .svc { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+  .svc.is-sim { border-style: dashed; border-color: var(--sim); }
+  .svc p { font-size: 13.5px; color: var(--muted); }
+  code { font: 500 12.5px var(--mono); background: var(--sunk); padding: 1px 5px; border-radius: 4px; }
+
+  /* таблица ролей */
+  .scroll { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; min-width: 620px; font-size: 14px; }
+  th, td { text-align: left; vertical-align: top; padding: 11px 14px; border-bottom: 1px solid var(--line); }
+  thead th { font: 600 12px/1 var(--body); letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted); background: var(--sunk); }
+  tbody tr:last-child td, tbody tr:last-child th { border-bottom: 0; }
+  tbody th { font-family: var(--display); font-weight: 700; white-space: nowrap; }
+  .hidden-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+  .hidden-list div { background: var(--sunk); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+  .hidden-list b { display: block; font-family: var(--display); margin-bottom: 2px; }
+
+  /* жизнь рейса */
+  ol.steps { margin: 0; padding: 0; list-style: none; counter-reset: s; display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 10px; }
+  ol.steps li { counter-increment: s; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+  ol.steps li::before { content: counter(s); font: 500 12px/1 var(--mono); color: var(--accent-ink); }
+  ol.steps .when { font: 500 12px/1.3 var(--mono); color: var(--muted); }
+  ol.steps p { font-size: 13.5px; color: var(--muted); }
+  .branches { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 10px; }
+  .branch { border-left: 3px solid var(--accent); background: var(--sunk); padding: 10px 14px; font-size: 14px; }
+  .branch b { display: block; }
+
+  /* деньги */
+  .money { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+  .bar { display: flex; height: 34px; border-radius: 8px; overflow: hidden; }
+  .bar span { display: block; }
+  .bar .d { width: 86%; background: var(--drv); } .bar .c { width: 10%; background: var(--staff); } .bar .g { width: 4%; background: var(--later); }
+  .split { display: flex; flex-wrap: wrap; gap: 8px 22px; font-size: 14px; }
+  .split span { display: inline-flex; gap: 8px; align-items: center; }
+  .split i { width: 12px; height: 12px; border-radius: 3px; display: inline-block; }
+  .split b { font: 500 14px var(--mono); font-variant-numeric: tabular-nums; }
+
+  /* проверки и этапы */
+  .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+  .fact { background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px; }
+  .fact b { display: block; font: 800 28px/1 var(--display); font-variant-numeric: tabular-nums; }
+  .fact span { font-size: 13.5px; color: var(--muted); }
+  ol.stages { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 8px; }
+  ol.stages li { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 12px; align-items: center; background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; }
+  ol.stages .letter { font: 800 18px/1 var(--display); color: var(--accent-ink); }
+  ol.stages p { font-size: 13.5px; color: var(--muted); }
+  footer { color: var(--muted); font-size: 13px; border-top: 1px solid var(--line); padding-top: 16px; }
+
+  @media (max-width: 760px) {
+    .lanes, .core { grid-template-columns: minmax(0, 1fr); }
+    .pipe { padding-left: 14px; }
+    ol.stages li { grid-template-columns: 28px minmax(0, 1fr); }
+    ol.stages .tag { grid-column: 2; justify-self: start; }
+  }
+</style>
+
+<div class="page">
+  <header>
+    <span class="eyebrow">TransportApp · попутные поездки по Еревану · 20.11.2026</span>
+    <h1>Схема виртуальной модели</h1>
+    <p class="lead">Модель — это настоящие приложения и настоящий сервер. Заменены симуляторами только внешние службы: банк, SMS и звонки. Всё, что проверено на модели, потом становится продуктом без переписывания.</p>
+    <div class="legend">
+      <span><span class="tag real">настоящее</span> работает как в продукте</span>
+      <span><span class="tag sim">симулятор</span> заменяет внешнюю службу</span>
+      <span><span class="tag later">позже</span> ещё не сделано</span>
+    </div>
+  </header>
+
+  <section aria-labelledby="s-map">
+    <h2 id="s-map">Как всё устроено</h2>
+
+    <span class="tier-name">Люди и их программы</span>
+    <div class="lanes">
+      <div class="lane pass">
+        <div class="who"><span class="dot"></span><b>Пассажир</b><small>Android, iPhone</small></div>
+        <div class="app">
+          <div class="app-head"><h3>Приложение пассажира</h3><span class="tag real">настоящее</span></div>
+          <ul class="plain">
+            <li>вход по коду из SMS</li>
+            <li>«откуда — куда» на карте, рейсы на 3 дня</li>
+            <li>выбор мест по схеме салона</li>
+            <li>оплата привязанной картой</li>
+            <li>билет, место посадки, машина на карте</li>
+            <li>звонок водителю без показа номера</li>
+            <li>оценка после поездки</li>
+          </ul>
+          <p class="state">Сейчас: работает на телефоне на демо-данных. К серверу подключается на этапе B.</p>
+        </div>
+      </div>
+      <div class="lane drv">
+        <div class="who"><span class="dot"></span><b>Водитель</b><small>Android, iPhone</small></div>
+        <div class="app">
+          <div class="app-head"><h3>Приложение водителя</h3><span class="tag later">этап C</span></div>
+          <ul class="plain">
+            <li>анкета: машина, номер, документы</li>
+            <li>рейс: маршрут, время, место посадки</li>
+            <li>цены мест — свои, но не ниже минимума маршрута</li>
+            <li>список пассажиров: имя и место</li>
+            <li>начать, отметить посадку, завершить</li>
+            <li>заработок и выплаты</li>
+          </ul>
+          <p class="state">Сейчас: черновой прототип. Роль водителя обсудим перед этапом C.</p>
+        </div>
+      </div>
+      <div class="lane staff">
+        <div class="who"><span class="dot"></span><b>Сотрудники</b><small>5 ролей, браузер</small></div>
+        <div class="app">
+          <div class="app-head"><h3>Веб-панель</h3><span class="tag later">этап D</span></div>
+          <ul class="plain">
+            <li><b>модератор</b> — маршруты, базовая и минимальная цена</li>
+            <li><b>проверяющий</b> — допуск водителей</li>
+            <li><b>поддержка</b> — блокировки, отмены, возвраты по жалобам</li>
+            <li><b>финансы</b> — начисления и выплаты</li>
+            <li><b>владелец</b> — роли и журнал действий</li>
+          </ul>
+          <p class="state">Сейчас: панели нет, но все её действия на сервере уже есть и проверены.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="pipe"><i></i><p><b>Приложения только читают то, что им разрешено.</b> Любое изменение идёт через действие сервера, которое само проверяет, кто просит и можно ли. Взломанное приложение не сможет ни списать деньги, ни увидеть чужое.</p></div>
+
+    <span class="tier-name">Сервер</span>
+    <div class="core">
+      <div class="server">
+        <div class="server-head"><b>Тестовый сервер</b><span class="tag real">настоящее</span></div>
+        <div class="parts">
+          <div class="part"><span class="n">вход</span><h3>Кто вошёл</h3><p>Код из SMS. Телефон берётся из входа, приложение подменить его не может.</p></div>
+          <div class="part"><span class="n">13 таблиц</span><h3>Правила доступа</h3><p>Для каждой таблицы записано, какие строки и столбцы видит каждая роль.</p></div>
+          <div class="part"><span class="n">23 действия</span><h3>Действия сервера</h3><p>Купить место, поставить рейс, вернуть деньги, выплатить. Другого способа что-то изменить нет.</p></div>
+          <div class="part"><span class="n">данные</span><h3>База</h3><p>Люди, водители, маршруты, рейсы, места, брони, карты.</p></div>
+          <div class="part"><span class="n">только дополняются</span><h3>Два журнала</h3><p>Журнал денег и журнал действий сотрудников. Стереть или исправить запись нельзя.</p></div>
+          <div class="part"><span class="n">по расписанию</span><h3>Сам сервер</h3><p>Закрывает забытые рейсы, отменяет несостоявшиеся, начисляет доли через 24 часа.</p></div>
+        </div>
+        <p class="state">Сейчас: готов и проверен на этом компьютере. В облако выкладывается на этапе B, когда будет учётная запись Supabase.</p>
+      </div>
+      <div class="bench">
+        <span class="arrow">← проверяет сервер напрямую</span>
+        <h3>Стенд проверок</h3>
+        <ul class="plain">
+          <li>виртуальные пассажиры, водители и сотрудники действуют как настоящие</li>
+          <li>часы сервера переводятся вперёд: сутки проходят за секунду</li>
+          <li>агенты-тестировщики ищут ошибки и пишут новые проверки</li>
+          <li>после каждого шага сверяется целостность и деньги до драма</li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="pipe"><i></i><p>К внешним службам обращается <b>только сервер</b>. У приложений нет ключей ни от банка, ни от SMS.</p></div>
+
+    <span class="tier-name">Внешние службы</span>
+    <div class="ext">
+      <div class="svc is-sim"><div class="app-head"><h3>Банк</h3><span class="tag sim">симулятор</span></div><p>Оплата картой, возвраты, выплаты. Карта на <code>…0002</code> — отказ, на <code>…0119</code> — банк недоступен.</p></div>
+      <div class="svc is-sim"><div class="app-head"><h3>SMS</h3><span class="tag sim">симулятор</span></div><p>Код входа не отправляется оператором, а показывается в модели.</p></div>
+      <div class="svc"><div class="app-head"><h3>Яндекс Карты</h3><span class="tag real">настоящее</span></div><p>Карта, пробки, маршрут по дорогам, поиск адресов.</p></div>
+      <div class="svc"><div class="app-head"><h3>Звонки</h3><span class="tag later">этап E</span></div><p>Звонок внутри приложения. Номера пассажира и водителя не видны друг другу.</p></div>
+      <div class="svc"><div class="app-head"><h3>Чеки, налоговая</h3><span class="tag later">после модели</span></div><p>Чек пассажиру и передача госпошлины — когда будет банк и юрист.</p></div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-roles">
+    <h2 id="s-roles">Кто что видит и может</h2>
+    <div class="scroll">
+      <table>
+        <thead><tr><th>Роль</th><th>Видит</th><th>Может</th></tr></thead>
+        <tbody>
+          <tr><th>Пассажир</th><td>Расписание и свободные места, свои брони, свои карты (только последние 4 цифры)</td><td>Купить и отменить места, оценить поездку</td></tr>
+          <tr><th>Водитель</th><td>Свои рейсы, пассажиров рейса (имя и место), свой заработок</td><td>Поставить рейс и цены мест, отменить, начать, отметить посадку, завершить</td></tr>
+          <tr><th>Модератор</th><td>Все маршруты, включая черновики</td><td>Создать и опубликовать маршрут, задать базовую и минимальную цену места</td></tr>
+          <tr><th>Проверяющий</th><td>Анкеты водителей</td><td>Одобрить или отклонить водителя (свою анкету — нельзя)</td></tr>
+          <tr><th>Поддержка</th><td>Профили, брони, обращения к банку</td><td>Заблокировать пользователя, отменить рейс или бронь, вернуть деньги по жалобе</td></tr>
+          <tr><th>Финансы</th><td>Журнал денег и выплаты</td><td>Запустить начисление, сформировать и отметить выплаты</td></tr>
+          <tr><th>Владелец</th><td>Всё, включая журнал действий сотрудников</td><td>Назначать роли. Заблокировать владельца или снять последнего нельзя</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="hidden-list">
+      <div><b>Номер карты</b>Не хранится нигде. В базе только метка банка и последние 4 цифры.</div>
+      <div><b>Телефоны</b>Пассажир и водитель не видят номеров друг друга.</div>
+      <div><b>Кто поставил оценку</b>Водитель видит только свой общий рейтинг.</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-trip">
+    <h2 id="s-trip">Жизнь одного рейса</h2>
+    <ol class="steps">
+      <li><span class="when">до 7 дней вперёд</span><h3>Водитель ставит рейс</h3><p>Готовый маршрут, время, место посадки в начальном районе, цены мест не ниже минимума.</p></li>
+      <li><span class="when">до 5 минут до выезда</span><h3>Продажа мест</h3><p>Оплата картой, бронь сразу. Бесплатная отмена — не позже чем за 60 минут.</p></li>
+      <li><span class="when">за 15 минут</span><h3>Подача</h3><p>Пассажир видит машину на карте. Водитель может начать рейс и отмечать, кто сел.</p></li>
+      <li><span class="when">время отправления</span><h3>Поездка</h3><p>Без остановок по пути. Высадка в конечной точке маршрута.</p></li>
+      <li><span class="when">не раньше отправления</span><h3>Финиш</h3><p>Водитель завершает рейс, пассажир ставит оценку.</p></li>
+      <li><span class="when">+24 часа</span><h3>Начисление</h3><p>Доля водителя начислена. До этого поддержка ещё может вернуть деньги по жалобе.</p></li>
+      <li><span class="when">раз в неделю</span><h3>Выплата</h3><p>Финансы перечисляют водителю всё начисленное.</p></li>
+    </ol>
+    <h3>Если что-то пошло не так</h3>
+    <div class="branches">
+      <div class="branch"><b>Водитель отменил рейс</b>Всем пассажирам полный возврат.</div>
+      <div class="branch"><b>Рейс так и не начался</b>Через 2 часа после конца по расписанию отменяется сам, полный возврат, водителю ничего.</div>
+      <div class="branch"><b>Водитель забыл завершить</b>Рейс закрывается сам, доля начисляется как обычно.</div>
+      <div class="branch"><b>Водителя заблокировали или отозвали допуск</b>Его не начатые рейсы отменяются с полным возвратом.</div>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-money">
+    <h2 id="s-money">Путь денег</h2>
+    <div class="money">
+      <p>Пассажир заплатил за место <b>1 000 ֏</b>. Через 24 часа после рейса сумма делится так:</p>
+      <div class="bar" role="img" aria-label="Водителю 860, комиссия 100, госпошлина 40"><span class="d"></span><span class="c"></span><span class="g"></span></div>
+      <div class="split">
+        <span><i style="background:var(--drv)"></i>водителю <b>860 ֏</b></span>
+        <span><i style="background:var(--staff)"></i>комиссия платформы 10 % <b>100 ֏</b></span>
+        <span><i style="background:var(--later)"></i>госпошлина 4 % <b>40 ֏</b></span>
+      </div>
+      <p class="note">Комиссия 10 % — пример, ставка не утверждена. Цену места ставит водитель, но не ниже минимальной цены маршрута: с неё платятся комиссия и госпошлина. Округление всегда в пользу водителя.</p>
+    </div>
+  </section>
+
+  <section aria-labelledby="s-check">
+    <h2 id="s-check">Как модель проверяется</h2>
+    <div class="facts">
+      <div class="fact"><b>248</b><span>проверок правил, доступов, денег и одновременных действий</span></div>
+      <div class="fact"><b>26</b><span>проверок целостности после каждого шага</span></div>
+      <div class="fact"><b>4 000</b><span>случайных действий в одной симуляции</span></div>
+      <div class="fact"><b>35</b><span>ошибок найдено агентами и исправлено</span></div>
+    </div>
+    <p class="note">В каждой симуляции сверяется одно равенство: получено от пассажиров минус возвращено равно сумме долей водителей, комиссии и госпошлины. Расхождение даже в один драм считается ошибкой.</p>
+  </section>
+
+  <section aria-labelledby="s-stages">
+    <h2 id="s-stages">Этапы</h2>
+    <ol class="stages">
+      <li><span class="letter">A</span><div><h3>Сервер и стенд проверок</h3><p>База, правила доступа, действия сервера, симулятор банка.</p></div><span class="tag real">готово</span></li>
+      <li><span class="letter">B</span><div><h3>Пассажир на сервере</h3><p>Вход по SMS, привязанные карты, брони и билеты через сервер.</p></div><span class="tag sim">следующий</span></li>
+      <li><span class="letter">C</span><div><h3>Приложение водителя</h3><p>Анкета, рейсы с ценами, посадка, заработок.</p></div><span class="tag later">позже</span></li>
+      <li><span class="letter">D</span><div><h3>Веб-панель сотрудников</h3><p>Маршруты, проверка водителей, поддержка, финансы.</p></div><span class="tag later">позже</span></li>
+      <li><span class="letter">E</span><div><h3>Сквозная проверка и показ</h3><p>Звонки в приложении, проход всех ролей от начала до конца, показ заказчику.</p></div><span class="tag later">позже</span></li>
+    </ol>
+  </section>
+
+  <footer>Схема описывает состояние на 20 ноября 2026 года и обновляется по мере работы.</footer>
+</div>

@@ -93,6 +93,8 @@ const invariants = <String, String>{
     select case when exists (
       select 1 from staff s join profiles p on p.id = s.user_id where 'owner' = any (s.roles) and not p.blocked
     ) then 0 else 1 end''',
+  'минимальная цена маршрута — от 1 до его базовой цены': '''
+    select count(*) from routes where min_price < 1 or min_price > base_price''',
   'место рейса есть в машине водителя': '''
     select count(*) from trip_seats s join trips t on t.id = s.trip_id join drivers d on d.user_id = t.driver_id
     where s.seat_id = 'rm' and d.seats_total = 3 and t.status in ('planned', 'started')''',

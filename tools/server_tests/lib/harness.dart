@@ -205,11 +205,11 @@ class World {
     return a;
   }
 
-  /// Новый опубликованный маршрут.
-  Future<String> newRoute(String code, {int price = 500, int minutes = 25, int length = 9000, bool publish = true}) async {
+  /// Новый опубликованный маршрут. [minPrice] — минимальная цена места (по умолчанию 1, чтобы не мешать прочим проверкам).
+  Future<String> newRoute(String code, {int price = 500, int minPrice = 1, int minutes = 25, int length = 9000, bool publish = true}) async {
     final id = await moderator.one(
-      'select staff_save_route(null, @code, @fn, 40.2264, 44.4930, @tn, 40.1777, 44.5126, @p::int, @m::int, @l::int)',
-      {'code': code, 'fn': 'Давташен', 'tn': 'Площадь Республики', 'p': '$price', 'm': '$minutes', 'l': '$length'},
+      'select staff_save_route(null, @code, @fn, 40.2264, 44.4930, @tn, 40.1777, 44.5126, @p::int, @m::int, @l::int, 4283388645, @mn::int)',
+      {'code': code, 'fn': 'Давташен', 'tn': 'Площадь Республики', 'p': '$price', 'mn': '$minPrice', 'm': '$minutes', 'l': '$length'},
     ) as String;
     if (publish) await moderator.q("select staff_set_route_status(@r::uuid, 'published')", {'r': id});
     return id;

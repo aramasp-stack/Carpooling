@@ -80,13 +80,15 @@ create table public.routes (
   to_lat double precision not null,
   to_lon double precision not null,
   base_price int not null check (base_price between 1 and 1000000),      -- базовая цена места, драм
+  min_price int not null check (min_price >= 1),      -- ниже этой цены водитель место не продаст; задаёт модератор
   minutes int not null check (minutes between 1 and 600),            -- время в пути по расписанию
   length_m int not null check (length_m between 100 and 200000),          -- длина по дорогам, метры
   color bigint not null default 4283388645,            -- цвет линии, 0xAARRGGBB
   status public.route_status not null default 'draft',
   created_by uuid references public.profiles (id),
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  check (min_price <= base_price)
 );
 
 -- ---------- рейсы (ставит водитель на готовый маршрут) ----------

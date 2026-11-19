@@ -185,11 +185,14 @@ end $$;
 
 -- ---------- маршруты (модератор) ----------
 
+-- Цены мест ставит сам водитель, но не ниже минимальной цены маршрута (p_min_price) и не выше трёх базовых.
+-- Минимум не указан: у нового маршрута он равен базовой цене, у существующего остаётся прежним.
 create function public.staff_save_route(
   p_id uuid, p_code text,
   p_from_name text, p_from_lat double precision, p_from_lon double precision,
   p_to_name text, p_to_lat double precision, p_to_lon double precision,
-  p_base_price int, p_minutes int, p_length_m int, p_color bigint default 4283388645
+  p_base_price int, p_minutes int, p_length_m int, p_color bigint default 4283388645,
+  p_min_price int default null
 ) returns uuid
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
@@ -204,7 +207,8 @@ begin
      or p_base_price is null or p_base_price not between 1 and 1000000
      or p_minutes is null or p_minutes not between 1 and 600
      or p_length_m is null or p_length_m not between 100 and 200000
-     or p_color is null then
+     or p_color is null
+     or (p_min_price is not null and p_min_price not between 1 and p_base_price) then
     raise exception 'BAD_ARGUMENT';
   end if;
 
@@ -223,20 +227,22 @@ begin
 
   begin
     if p_id is null then
-      insert into routes (code, from_name, from_lat, from_lon, to_name, to_lat, to_lon, base_price, minutes, length_m, color, created_by)
-      values (p_code, _trim(p_from_name), p_from_lat, p_from_lon, _trim(p_to_name), p_to_lat, p_to_lon, p_base_price, p_minutes, p_length_m, p_color, u)
+      insert into routes (code, from_name, from_lat, from_lon, to_name, to_lat, to_lon, base_price, min_price, minutes, length_m, color, created_by)
+      values (p_code, _trim(p_from_name), p_from_lat, p_from_lon, _trim(p_to_name), p_to_lat, p_to_lon, p_base_price,
+              coalesce(p_min_price, p_base_price), p_minutes, p_length_m, p_color, u)
       returning id into rid;
     else
       update routes set code = p_code, from_name = _trim(p_from_name), from_lat = p_from_lat, from_lon = p_from_lon,
         to_name = _trim(p_to_name), to_lat = p_to_lat, to_lon = p_to_lon,
-        base_price = p_base_price, minutes = p_minutes, length_m = p_length_m, color = p_color, updated_at = now()
+        base_price = p_base_price, min_price = coalesce(p_min_price, least(old.min_price, p_base_price)),
+        minutes = p_minutes, length_m = p_length_m, color = p_color, updated_at = now()
       where id = p_id
       returning id into rid;
     end if;
   exception when unique_violation then
     raise exception 'ROUTE_CODE_TAKEN';
   end;
-  perform _audit('save_route', 'route', rid::text, jsonb_build_object('code', p_code, 'base_price', p_base_price));
+  perform _audit('save_route', 'route', rid::text, jsonb_build_object('code', p_code, 'base_price', p_base_price, 'min_price', p_min_price));
   return rid;
 end $$;
 
@@ -357,6 +363,10 @@ begin
        or (s ->> 'price')::int < 1 or (s ->> 'price')::int > r.base_price * 3
   ) then
     raise exception 'BAD_PRICE';
+  end if;
+  -- Цену ставит водитель, но не ниже минимума маршрута: с неё платятся комиссия и госпошлина.
+  if exists (select 1 from jsonb_array_elements(p_seats) s where (s ->> 'price')::int < r.min_price) then
+    raise exception 'PRICE_BELOW_MINIMUM';
   end if;
 
   -- Один водитель не может быть в двух рейсах одновременно.
@@ -788,7 +798,7 @@ grant execute on function
   public.setting_int(text), public.app_now(), public.has_role(text),
   public.register_profile(text, text),
   public.staff_set_roles(uuid, text[]), public.staff_block_user(uuid, boolean),
-  public.staff_save_route(uuid, text, text, double precision, double precision, text, double precision, double precision, int, int, int, bigint),
+  public.staff_save_route(uuid, text, text, double precision, double precision, text, double precision, double precision, int, int, int, bigint, int),
   public.staff_set_route_status(uuid, public.route_status),
   public.apply_driver(text, text, text, int, text), public.staff_review_driver(uuid, boolean, text),
   public.driver_create_trip(uuid, timestamptz, int, jsonb), public.driver_cancel_trip(uuid),
