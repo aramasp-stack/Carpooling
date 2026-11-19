@@ -155,7 +155,7 @@ class HomeState extends State<HomeScreen> {
   List<RouteMatch> _matchesTo(GeoPoint? toPoint) => from == null
       ? const []
       : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: toPoint, nearMeters: Demo.nearMeters)
-          .where((m) => meetWalk(m) <= Demo.meetWalkMeters)
+          .where((m) => meetWalk(m) <= meetLimit)
           .toList();
 
   /// Выбрать пункт назначения из списка под полем «Куда».
@@ -187,10 +187,20 @@ class HomeState extends State<HomeScreen> {
     return null;
   }
 
-  void setPlace(String which, Place? p) {
+  /// «Откуда» выбрано точкой на карте — тогда места посадки ищем ближе (500 м вместо 1 км).
+  bool fromOnMap = false;
+
+  /// Насколько далеко от «откуда» может быть место посадки, метры.
+  double get meetLimit => fromOnMap ? Demo.meetWalkMapPointMeters : Demo.meetWalkMeters;
+
+  /// Тот же радиус словами: «500 м» или «1 км».
+  String get meetLimitText => meetLimit >= 1000 ? '${(meetLimit / 1000).round()} км' : '${meetLimit.round()} м';
+
+  void setPlace(String which, Place? p, {bool onMap = false}) {
     update(() {
       if (which == 'from') {
         from = p;
+        fromOnMap = onMap && p != null;
         fromCtl.text = p?.name ?? '';
       } else {
         to = p;
@@ -325,7 +335,7 @@ class HomeState extends State<HomeScreen> {
       return;
     }
     update(() => pick = null);
-    setPlace(which, Place('Точка на карте', p));
+    setPlace(which, Place('Точка на карте', p), onMap: true);
     _sheetTo(MapSheetScaffold.initialSize);
   }
 

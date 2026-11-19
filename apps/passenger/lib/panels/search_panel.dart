@@ -197,11 +197,11 @@ extension SearchPanel on HomeState {
       decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
       child: Column(children: [
         if (all.isEmpty)
-          const ListTile(
+          ListTile(
             dense: true,
-            leading: Icon(Icons.block, size: 20, color: AppColors.muted),
-            title: Text('Нет маршрутов', style: TextStyle(fontWeight: FontWeight.w600)),
-            subtitle: Text('В пределах 1 км от «откуда» нет мест посадки водителей.'),
+            leading: const Icon(Icons.block, size: 20, color: AppColors.muted),
+            title: const Text('Нет маршрутов', style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text('В пределах $meetLimitText от «откуда» нет мест посадки водителей.'),
           )
         else ...[
           for (final m in list)
@@ -248,7 +248,7 @@ extension SearchPanel on HomeState {
       return Padding(
         padding: const EdgeInsets.all(18),
         child: Text(
-          'Маршрутов нет${to != null ? ' в нужную сторону' : ''}: в пределах 1 км отсюда нет мест посадки водителей. Выберите другую точку.',
+          'Маршрутов нет${to != null ? ' в нужную сторону' : ''}: в пределах $meetLimitText отсюда нет мест посадки водителей. Выберите другую точку.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: AppColors.muted),
         ),
