@@ -11,15 +11,10 @@ extension SearchPanel on HomeState {
   Widget searchPanel() => Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
+          if (pick != null) _pickHint(),
           _whereBox(),
-          if (suggestions.isNotEmpty) _suggestBox(),
-          const SizedBox(height: 10),
-          Wrap(spacing: 8, runSpacing: 8, children: [
-            ActionChip(avatar: const Icon(Icons.my_location, size: 16), label: const Text('Я здесь'), onPressed: locateMe),
-            _pickChip('from', 'Откуда на карте'),
-            _pickChip('to', 'Куда на карте'),
-          ]),
-          if (from == null) _recent(),
+          if (suggestFor != null) _suggestBox(),
+          if (from == null && suggestFor == null) _recent(),
           const SizedBox(height: 8),
           Wrap(spacing: 8, children: [
             for (var d = 0; d < 3; d++)
@@ -36,15 +31,20 @@ extension SearchPanel on HomeState {
         ],
       );
 
-  Widget _pickChip(String which, String label) => FilterChip(
-        avatar: const Icon(Icons.place_outlined, size: 16),
-        label: Text(label),
-        selected: pick == which,
-        showCheckmark: false,
-        onSelected: (_) {
-          update(() => pick = pick == which ? null : which);
-          if (pick != null) toast(context, which == 'from' ? 'Нажмите на карту, откуда поедете' : 'Нажмите на карту, куда поедете');
-        },
+  /// Подсказка, пока пассажир выбирает точку на карте.
+  Widget _pickHint() => Container(
+        margin: const EdgeInsets.only(bottom: 8),
+        padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+        decoration: BoxDecoration(color: _accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+        child: Row(children: [
+          const Icon(Icons.touch_app_outlined, color: _accent),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(pick == 'from' ? 'Нажмите на карту, откуда поедете' : 'Нажмите на карту, куда поедете',
+                style: const TextStyle(fontWeight: FontWeight.w600)),
+          ),
+          TextButton(onPressed: cancelPick, child: const Text('Отмена')),
+        ]),
       );
 
   /// Последние маршруты пассажира: поиск в одно касание.
@@ -84,7 +84,9 @@ extension SearchPanel on HomeState {
           ),
           onTap: () => update(() {
             suggestFor = which;
-            suggestions = localPlaces(ctl.text);
+            // Поле уже заполнено: показываем весь список, а текст выделяем, чтобы ввод его заменил.
+            if (value != null) ctl.selection = TextSelection(baseOffset: 0, extentOffset: ctl.text.length);
+            suggestions = localPlaces(value != null ? '' : ctl.text);
           }),
           onChanged: (t) => update(() {
             suggestFor = which;
@@ -122,6 +124,24 @@ extension SearchPanel on HomeState {
         margin: const EdgeInsets.only(top: 6),
         decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
         child: Column(children: [
+          // Первые строки: своё местоположение (только для «откуда») и выбор на карте.
+          if (suggestFor == 'from')
+            ListTile(
+              dense: true,
+              leading: const Icon(Icons.my_location, size: 20, color: _accent),
+              title: const Text('Моё местоположение', style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () {
+                closeSuggest();
+                locateMe();
+              },
+            ),
+          ListTile(
+            dense: true,
+            leading: const Icon(Icons.map_outlined, size: 20, color: _accent),
+            title: const Text('Выбрать на карте', style: TextStyle(fontWeight: FontWeight.w600)),
+            onTap: () => startPick(suggestFor ?? 'from'),
+          ),
+          if (suggestions.isNotEmpty) const Divider(height: 1),
           for (final p in suggestions)
             ListTile(
               dense: true,
@@ -145,7 +165,7 @@ extension SearchPanel on HomeState {
             child: Text.rich(TextSpan(children: [
               TextSpan(text: 'Откуда поедете?\n', style: TextStyle(fontWeight: FontWeight.w700)),
               TextSpan(
-                text: 'Укажите место, точку на карте или нажмите «Я здесь» — покажем маршруты рядом. «Куда» можно добавить, чтобы остался один подходящий маршрут.',
+                text: 'Нажмите на поле «Откуда» и выберите место из списка, своё местоположение или точку на карте — покажем, куда можно уехать.',
                 style: TextStyle(fontSize: 13, color: AppColors.muted),
               ),
             ])),
@@ -161,7 +181,7 @@ extension SearchPanel on HomeState {
       return Padding(
         padding: const EdgeInsets.all(18),
         child: Text(
-          'Рядом с этой точкой нет маршрутов${to != null ? ' в нужную сторону' : ''}. Попробуйте другую точку.',
+          'Отсюда${to != null ? ' в нужную сторону' : ''} маршруты не начинаются. Сесть можно только в начале маршрута, в месте посадки водителя: выберите точку ближе к нему.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: AppColors.muted),
         ),
@@ -180,7 +200,10 @@ extension SearchPanel on HomeState {
   /// «место посадки рядом» или «до места посадки 400 м пешком».
   String meetText(double walk) => walk < 120 ? 'место посадки рядом с вами' : 'до места посадки ${meters(walk)} пешком';
 
-  String _walk(RouteMatch m) => m.pick.distance < 120 ? 'начинается рядом' : 'до маршрута ${meters(m.pick.distance)} пешком';
+  String _walk(RouteMatch m) {
+    final d = startWalk(m);
+    return d < 120 ? 'начинается рядом' : 'до начала маршрута ${meters(d)} пешком';
+  }
 
   Widget _routeCard(RouteMatch m) {
     final n = driversFor(m).where((x) => x.trip.freeCount > 0).length;
@@ -221,8 +244,7 @@ extension SearchPanel on HomeState {
           ]),
           const SizedBox(height: 2),
           Text(
-            '${m.pick.distance < 120 ? 'маршрут начинается рядом' : 'до маршрута ${meters(m.pick.distance)} пешком'}'
-            '${m.drop != null && m.drop!.distance >= 120 ? ' · от маршрута до места ${meters(m.drop!.distance)}' : ''}',
+            '${startWalk(m) < 120 ? 'маршрут ' : ''}${_walk(m)} · высадка в конечной точке',
             style: const TextStyle(fontSize: 13, color: AppColors.muted),
           ),
           const SizedBox(height: 6),

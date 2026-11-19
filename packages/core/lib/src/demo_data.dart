@@ -20,6 +20,9 @@ class Demo {
   /// Все в пределах начального района маршрута.
   static const meetSpots = <double>[0, 400, 900];
 
+  /// Начальный район маршрута: первые метры линии, где водитель может выбрать место посадки.
+  static const startDistrictMeters = 1500.0;
+
   /// Надбавки к базовой цене места: переднее дороже, заднее посередине дешевле.
   static const seatFrontExtra = 100;
   static const seatWindowExtra = 0;

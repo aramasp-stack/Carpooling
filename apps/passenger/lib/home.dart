@@ -49,6 +49,7 @@ class HomeScreen extends StatefulWidget {
 
 class HomeState extends State<HomeScreen> {
   final map = TransportMapController();
+  final sheet = DraggableScrollableController();
   final loader = RouteLoader();
   late final trips = TripService(widget.data);
   DataStore get data => widget.data;
@@ -96,6 +97,7 @@ class HomeState extends State<HomeScreen> {
   @override
   void dispose() {
     simTimer?.cancel();
+    sheet.dispose();
     fromCtl.dispose();
     toCtl.dispose();
     super.dispose();
@@ -135,9 +137,24 @@ class HomeState extends State<HomeScreen> {
   }
 
   // ---------- поиск ----------
+  /// Маршруты, на которые можно сесть отсюда: только те, что начинаются рядом с «откуда».
+  /// Маршрут, который здесь лишь проходит, не подходит: по пути водитель никого не подбирает.
   List<RouteMatch> get matches => from == null
       ? const []
-      : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: to?.point, nearMeters: Demo.nearMeters);
+      : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: to?.point, nearMeters: Demo.nearMeters)
+          .where((m) => startWalk(m) <= Demo.nearMeters)
+          .toList();
+
+  /// Сколько идти от «откуда» до начального района маршрута, метры.
+  double startWalk(RouteMatch m) {
+    final g = m.geometry;
+    var best = double.infinity;
+    for (var a = 0.0; a <= Demo.startDistrictMeters && a <= g.length; a += 100) {
+      final d = distanceMeters(from!.point, g.pointAt(a));
+      if (d < best) best = d;
+    }
+    return best;
+  }
 
   RouteMatch? activeOf(List<RouteMatch> m) {
     if (to != null) return m.isEmpty ? null : m.first;
@@ -213,14 +230,44 @@ class HomeState extends State<HomeScreen> {
     return hour == null ? all : all.where((x) => x.at.hour == hour).toList();
   }
 
+  /// Закрыть список мест под полем «Откуда» / «Куда».
+  void closeSuggest() {
+    update(() {
+      suggestFor = null;
+      suggestions = [];
+    });
+    FocusManager.instance.primaryFocus?.unfocus();
+  }
+
+  /// Выбор точки на карте: панель опускается, чтобы карта была видна.
+  void startPick(String which) {
+    closeSuggest();
+    update(() => pick = which);
+    _sheetTo(0.22);
+  }
+
+  void cancelPick() {
+    update(() => pick = null);
+    _sheetTo(MapSheetScaffold.initialSize);
+  }
+
+  void _sheetTo(double size) {
+    if (sheet.isAttached) sheet.animateTo(size, duration: const Duration(milliseconds: 250), curve: Curves.easeOut);
+  }
+
   void onMapTap(GeoPoint p) {
     final which = pick;
     if (which == null) {
+      if (suggestFor != null) {
+        closeSuggest();
+        return;
+      }
       _tapRoute(p);
       return;
     }
     update(() => pick = null);
     setPlace(which, Place('Точка на карте', p));
+    _sheetTo(MapSheetScaffold.initialSize);
   }
 
   /// Касание линии маршрута на карте выбирает этот маршрут, когда показаны все маршруты рядом.
@@ -407,6 +454,7 @@ class HomeState extends State<HomeScreen> {
       },
       child: MapSheetScaffold(
         map: TransportMap(controller: map, onTap: onMapTap, bottomCover: MapSheetScaffold.initialSize),
+        sheetController: sheet,
         panel: _panel(),
         bottomBar: NavigationBar(
           selectedIndex: tab.index,
