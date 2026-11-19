@@ -20,7 +20,7 @@ class MapRoute {
 }
 
 /// Виды меток.
-enum MarkerKind { from, to, pickup, start, finish, passenger, me }
+enum MarkerKind { from, to, pickup, pickupSelected, start, finish, passenger, me }
 
 class _Marker {
   const _Marker(this.point, this.kind, this.hint);
@@ -285,6 +285,11 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     if (kind == MarkerKind.me) {
       return _icons.putIfAbsent('me', () => yi.ImageProvider(_drawMe, id: 'me'));
     }
+    if (kind == MarkerKind.pickupSelected) {
+      // Выбранное место посадки: крупнее и темнее остальных.
+      return _icons.putIfAbsent(
+          'meet-selected', () => yi.ImageProvider(() => _drawDot(const Color(0xFF1E3A8A), Colors.white, size: 44), id: 'meet-selected'));
+    }
     final (fill, ring) = switch (kind) {
       MarkerKind.from => (AppColors.from, Colors.white),
       MarkerKind.to => (AppColors.to, Colors.white),
@@ -293,6 +298,7 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
       MarkerKind.finish => (AppColors.to, Colors.white),
       MarkerKind.passenger => (const Color(0xFF2563EB), Colors.white),
       MarkerKind.me => (const Color(0xFF0EA5E9), Colors.white),
+      MarkerKind.pickupSelected => (const Color(0xFF1E3A8A), Colors.white),
     };
     return _icons.putIfAbsent('dot-${kind.name}', () => yi.ImageProvider(() => _drawDot(fill, ring), id: 'dot-${kind.name}'));
   }
@@ -302,8 +308,8 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
 
   double get _dpr => View.of(context).devicePixelRatio;
 
-  Future<ui.Image> _drawDot(Color fill, Color ring) {
-    final s = 30 * _dpr;
+  Future<ui.Image> _drawDot(Color fill, Color ring, {double size = 30}) {
+    final s = size * _dpr;
     final rec = ui.PictureRecorder();
     final canvas = Canvas(rec);
     final center = Offset(s / 2, s / 2);

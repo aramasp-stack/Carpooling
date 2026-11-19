@@ -66,6 +66,7 @@ class HomeState extends State<HomeScreen> {
   String? routeId; // маршрут, выбранный из списка, когда указано только «откуда»
   int day = 0;
   int? hour; // час отправления; null — любой
+  double? meetFilter; // выбранное на карте место посадки (метры от начала маршрута); null — все
   String? pick; // 'from' | 'to' — ждём нажатия на карту
   final fromCtl = TextEditingController();
   final toCtl = TextEditingController();
@@ -182,6 +183,7 @@ class HomeState extends State<HomeScreen> {
       }
       routeId = null;
       hour = null;
+      meetFilter = null;
       // В «Куда» могло стоять название маршрута, выбранного раньше; без выбора оно лишнее.
       if (to == null) toCtl.text = '';
       suggestions = [];
@@ -196,6 +198,7 @@ class HomeState extends State<HomeScreen> {
     update(() {
       routeId = id;
       hour = null;
+      meetFilter = null;
       if (to == null) toCtl.text = Demo.routeById(id)?.to.name ?? '';
     });
     syncMap();
@@ -206,6 +209,7 @@ class HomeState extends State<HomeScreen> {
     update(() {
       routeId = null;
       hour = null;
+      meetFilter = null;
       if (to == null) toCtl.text = '';
     });
     syncMap();
@@ -215,13 +219,20 @@ class HomeState extends State<HomeScreen> {
     update(() {
       day = d;
       hour = null;
+      meetFilter = null;
     });
-    syncMap();
+    syncMap(refit: false);
   }
 
   void setHour(int? h) {
     update(() => hour = h);
-    syncMap();
+    syncMap(refit: false);
+  }
+
+  /// Оставить рейсы только от выбранного места посадки (null — все места).
+  void setMeet(double? along) {
+    update(() => meetFilter = along);
+    syncMap(refit: false);
   }
 
   /// Где водитель ждёт пассажиров.
@@ -230,11 +241,33 @@ class HomeState extends State<HomeScreen> {
   /// Сколько идти от «откуда» до места посадки, метры.
   double walkTo(Trip t, RouteGeometry g) => from == null ? 0 : distanceMeters(from!.point, meetPoint(t, g));
 
-  /// Рейсы маршрута на выбранный день и час.
-  List<({Trip trip, DateTime at})> visibleTrips(RouteMatch m) {
+  /// Рейсы маршрута на выбранный день и час — до выбора места посадки.
+  List<({Trip trip, DateTime at})> tripsOfHour(RouteMatch m) {
     final all = driversFor(m);
     return hour == null ? all : all.where((x) => x.at.hour == hour).toList();
   }
+
+  /// Рейсы в списке: выбранные день, час и место посадки.
+  List<({Trip trip, DateTime at})> visibleTrips(RouteMatch m) {
+    final list = tripsOfHour(m);
+    return meetFilter == null ? list : list.where((x) => x.trip.meetAlong == meetFilter).toList();
+  }
+
+  /// Касание синей точки выбирает это место посадки; повторное касание — снова все места.
+  void _tapMeet(GeoPoint p, RouteMatch m) {
+    double? best;
+    var bestDist = _meetTapMeters;
+    for (final along in {for (final x in tripsOfHour(m)) x.trip.meetAlong}) {
+      final d = distanceMeters(p, m.geometry.pointAt(along));
+      if (d < bestDist) {
+        best = along;
+        bestDist = d;
+      }
+    }
+    if (best != null) setMeet(best == meetFilter ? null : best);
+  }
+
+  static const _meetTapMeters = 180.0;
 
   /// Закрыть список мест под полем «Откуда» / «Куда».
   void closeSuggest() {
@@ -268,7 +301,12 @@ class HomeState extends State<HomeScreen> {
         closeSuggest();
         return;
       }
-      _tapRoute(p);
+      final active = pane is SearchPane && from != null ? activeOf(matches) : null;
+      if (active != null) {
+        _tapMeet(p, active);
+      } else {
+        _tapRoute(p);
+      }
       return;
     }
     update(() => pick = null);
@@ -376,7 +414,8 @@ class HomeState extends State<HomeScreen> {
   }
 
   // ---------- карта ----------
-  void syncMap() {
+  /// Перерисовать карту. [refit] — заново подобрать камеру (иначе остаётся приближение пассажира).
+  void syncMap({bool refit = true}) {
     map.clearAll();
     if (myPos != null) map.setMarker('me', myPos, MarkerKind.me);
     final p = pane;
@@ -389,14 +428,17 @@ class HomeState extends State<HomeScreen> {
         final active = activeOf(m);
         if (active != null) {
           map.showRoutes([MapRoute(active.route, active.geometry)]);
-          // Места посадки всех рейсов, которые сейчас в списке.
-          for (final x in visibleTrips(active)) {
-            map.setMarker('meet-${x.trip.meetAlong}', meetPoint(x.trip, active.geometry), MarkerKind.pickup);
+          // Места посадки рейсов выбранного дня и часа; выбранное — крупнее и темнее.
+          final g = active.geometry;
+          final meets = {for (final x in tripsOfHour(active)) x.trip.meetAlong};
+          for (final a in meets) {
+            map.setMarker('meet-$a', g.pointAt(a), a == meetFilter ? MarkerKind.pickupSelected : MarkerKind.pickup);
           }
-          map.fit([...active.geometry.points, from!.point, if (to != null) to!.point]);
+          // Камера — на начальный район: там места посадки, из них пассажир и выбирает.
+          if (refit) map.fit([from!.point, for (final a in meets) g.pointAt(a), g.pointAt(Demo.startDistrictMeters)]);
         } else {
           map.showRoutes([for (final x in m) MapRoute(x.route, x.geometry)]);
-          map.fit([from!.point, if (to != null) to!.point, for (final x in m) ...x.geometry.points]);
+          if (refit) map.fit([from!.point, if (to != null) to!.point, for (final x in m) ...x.geometry.points]);
         }
       case CarPane(:final match, :final trip):
         final g = match.geometry;

@@ -257,19 +257,43 @@ extension SearchPanel on HomeState {
         ]),
       ),
       SectionTitle('Водители · ${dayLabel(day).toLowerCase()}'),
-      const Padding(
-        padding: EdgeInsets.only(bottom: 8),
-        child: Text('Синие точки на карте — где водители ждут пассажиров. Подойдите туда к времени отправления.',
-            style: TextStyle(fontSize: 13, color: AppColors.muted)),
-      ),
+      if (meetFilter == null)
+        const Padding(
+          padding: EdgeInsets.only(bottom: 8),
+          child: Text('Синие точки на карте — где водители ждут пассажиров. Нажмите на точку, чтобы оставить рейсы только от этого места.',
+              style: TextStyle(fontSize: 13, color: AppColors.muted)),
+        )
+      else
+        _meetBanner(m),
       if (hours.length > 1) _hourChips(hours),
       if (list.isEmpty)
         const Padding(
           padding: EdgeInsets.all(12),
-          child: Text('На этот день рейсов больше нет. Выберите другой день.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted)),
+          child: Text('Рейсов нет. Выберите другой день, час или место посадки.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted)),
         ),
       for (final x in list) _driverRow(m, x.trip, x.at),
     ]);
+  }
+
+  /// Выбрано место посадки на карте: сколько до него идти и кнопка «Все места».
+  Widget _meetBanner(RouteMatch m) {
+    final walk = from == null ? 0.0 : distanceMeters(from!.point, m.geometry.pointAt(meetFilter!));
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.fromLTRB(14, 6, 6, 6),
+      decoration: BoxDecoration(color: const Color(0xFF1E3A8A).withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+      child: Row(children: [
+        const Icon(Icons.place, color: Color(0xFF1E3A8A)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text.rich(TextSpan(children: [
+            const TextSpan(text: 'Выбрано место посадки\n', style: TextStyle(fontWeight: FontWeight.w700)),
+            TextSpan(text: meetText(walk), style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+          ])),
+        ),
+        TextButton(onPressed: () => setMeet(null), child: const Text('Все места')),
+      ]),
+    );
   }
 
   /// Выбор часа отправления: только часы, в которые есть рейсы.
