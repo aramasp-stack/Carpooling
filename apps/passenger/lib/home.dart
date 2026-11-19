@@ -171,8 +171,44 @@ class HomeState extends State<HomeScreen> {
     update(() {
       routeId = id;
       hour = null;
+      if (to == null) toCtl.text = Demo.routeById(id)?.to.name ?? '';
     });
     syncMap();
+  }
+
+  /// Вернуться ко всем направлениям из «откуда».
+  void clearRoute() {
+    update(() {
+      routeId = null;
+      hour = null;
+      if (to == null) toCtl.text = '';
+    });
+    syncMap();
+  }
+
+  void setDay(int d) {
+    update(() {
+      day = d;
+      hour = null;
+    });
+    syncMap();
+  }
+
+  void setHour(int? h) {
+    update(() => hour = h);
+    syncMap();
+  }
+
+  /// Где водитель ждёт пассажиров.
+  GeoPoint meetPoint(Trip t, RouteGeometry g) => g.pointAt(t.meetAlong);
+
+  /// Сколько идти от «откуда» до места посадки, метры.
+  double walkTo(Trip t, RouteGeometry g) => from == null ? 0 : distanceMeters(from!.point, meetPoint(t, g));
+
+  /// Рейсы маршрута на выбранный день и час.
+  List<({Trip trip, DateTime at})> visibleTrips(RouteMatch m) {
+    final all = driversFor(m);
+    return hour == null ? all : all.where((x) => x.at.hour == hour).toList();
   }
 
   void onMapTap(GeoPoint p) {
@@ -242,8 +278,7 @@ class HomeState extends State<HomeScreen> {
   List<({Trip trip, DateTime at})> driversFor(RouteMatch m) {
     final now = trips.now;
     return [
-      for (final t in trips.tripsFor(m.route, day))
-        (trip: t, at: trips.timeAt(t, m.pick.along, m.geometry)),
+      for (final t in trips.tripsFor(m.route, day)) (trip: t, at: t.departure),
     ].where((x) => x.at.isAfter(now.add(const Duration(minutes: 5)))).toList();
   }
 
@@ -267,20 +302,24 @@ class HomeState extends State<HomeScreen> {
         final active = activeOf(m);
         if (active != null) {
           map.showRoutes([MapRoute(active.route, active.geometry)]);
-          map.setSegment(active.geometry.subLine(active.pick.along, active.dropAlong), color: Color(active.route.color));
-          map.setMarker('pickup', active.geometry.pointAt(active.pick.along), MarkerKind.pickup);
+          // Места посадки всех рейсов, которые сейчас в списке.
+          for (final x in visibleTrips(active)) {
+            map.setMarker('meet-${x.trip.meetAlong}', meetPoint(x.trip, active.geometry), MarkerKind.pickup);
+          }
           map.fit([...active.geometry.points, from!.point, if (to != null) to!.point]);
         } else {
           map.showRoutes([for (final x in m) MapRoute(x.route, x.geometry)]);
           map.fit([from!.point, if (to != null) to!.point, for (final x in m) ...x.geometry.points]);
         }
-      case CarPane(:final match):
-        final seg = match.geometry.subLine(match.pick.along, match.dropAlong);
-        map.showRoutes([MapRoute(match.route, match.geometry)]);
-        map.setSegment(seg, color: Color(match.route.color));
-        map.setMarker('pickup', match.geometry.pointAt(match.pick.along), MarkerKind.pickup);
+      case CarPane(:final match, :final trip):
+        final g = match.geometry;
+        final meet = meetPoint(trip, g);
+        map.showRoutes([MapRoute(match.route, g)]);
+        map.setSegment(g.subLine(trip.meetAlong, g.length), color: Color(match.route.color));
+        map.setMarker('pickup', meet, MarkerKind.pickup);
         if (from != null) map.setMarker('from', from!.point, MarkerKind.from);
-        map.fit([...seg, if (from != null) from!.point]);
+        // Камера — на место посадки и путь до него: это главное при выборе водителя.
+        map.fit([meet, if (from != null) from!.point, g.pointAt(trip.meetAlong + 600)]);
       case TicketPane(:final bookingId):
         final b = bookingById(bookingId);
         final g = b == null ? null : geoms[b.routeId];
@@ -310,7 +349,7 @@ class HomeState extends State<HomeScreen> {
     stopSim();
     final g = geoms[trip.route.id];
     if (g == null) return;
-    simPos = 0;
+    simPos = trip.meetAlong; // машина выезжает от места посадки
     simFactor = 10;
     simBoarded = false;
     simDone = false;

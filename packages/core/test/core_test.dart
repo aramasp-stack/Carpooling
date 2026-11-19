@@ -58,6 +58,29 @@ void main() {
       expect(t.driver.name, 'Арам');
       expect(s.tripById(t.id), isNotNull);
     });
+
+    test('место посадки: у демо-рейсов в начальном районе, у рейса водителя — сохраняется', () async {
+      final data = DataStore(MemoryStore());
+      final s = TripService(data, clock: () => DateTime(2026, 11, 9, 12));
+      final route = Demo.routeById('M1')!;
+      for (final t in s.tripsFor(route, 1)) {
+        expect(Demo.meetSpots, contains(t.meetAlong));
+      }
+      await data.addCustomTrip(CustomTrip(
+        id: 'M1-2026-11-10-10:15-c1', routeId: 'M1', date: '2026-11-10', time: '10:15', driverIndex: 0,
+        seats: seatsFor(route, 4), meetAlong: 650,
+      ));
+      expect(s.tripsFor(route, 1).firstWhere((t) => t.custom).meetAlong, 650);
+    });
+
+    test('время в пути считается от места посадки', () {
+      final route = Demo.routeById('M1')!;
+      final g = RouteGeometry.straight(route);
+      final dep = DateTime(2026, 11, 10, 8);
+      final t = Trip(id: 'x', route: route, departure: dep, driver: Demo.drivers.first, seats: const [], meetAlong: 400);
+      expect(service.timeAt(t, 400, g), dep);
+      expect(service.timeAt(t, g.length, g).isAfter(dep), isTrue);
+    });
   });
 
   group('поиск маршрутов', () {

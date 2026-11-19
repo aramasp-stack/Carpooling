@@ -26,10 +26,7 @@ extension SearchPanel on HomeState {
               ChoiceChip(
                 label: Text(dayLabel(d)),
                 selected: day == d,
-                onSelected: (_) => update(() {
-                  day = d;
-                  hour = null;
-                }),
+                onSelected: (_) => setDay(d),
               ),
           ]),
           const SizedBox(height: 6),
@@ -69,7 +66,8 @@ extension SearchPanel on HomeState {
 
   Widget _whereRow(String which) {
     final ctl = which == 'from' ? fromCtl : toCtl;
-    final value = which == 'from' ? from : to;
+    // «Куда» заполнено и тогда, когда маршрут выбран из списка или на карте.
+    final value = which == 'from' ? from : (to ?? (routeId == null ? null : Demo.routeById(routeId!)?.to));
     return Row(children: [
       Swatch(which == 'from' ? AppColors.from : AppColors.to, size: 10),
       const SizedBox(width: 10),
@@ -179,6 +177,9 @@ extension SearchPanel on HomeState {
     ]);
   }
 
+  /// «место посадки рядом» или «до места посадки 400 м пешком».
+  String meetText(double walk) => walk < 120 ? 'место посадки рядом с вами' : 'до места посадки ${meters(walk)} пешком';
+
   String _walk(RouteMatch m) => m.pick.distance < 120 ? 'начинается рядом' : 'до маршрута ${meters(m.pick.distance)} пешком';
 
   Widget _routeCard(RouteMatch m) {
@@ -204,17 +205,10 @@ extension SearchPanel on HomeState {
   Widget _drivers(RouteMatch m, int total) {
     final all = driversFor(m);
     final hours = {for (final x in all) x.at.hour}.toList()..sort();
-    final list = hour == null ? all : all.where((x) => x.at.hour == hour).toList();
+    final list = visibleTrips(m);
     final g = m.geometry;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      if (to == null && total > 1)
-        BackLink('Все направления отсюда', onTap: () {
-          update(() {
-            routeId = null;
-            hour = null;
-          });
-          syncMap();
-        }),
+      if (to == null && total > 1) BackLink('Все направления отсюда', onTap: clearRoute),
       Container(
         margin: const EdgeInsets.only(top: 6),
         padding: const EdgeInsets.all(14),
@@ -241,6 +235,11 @@ extension SearchPanel on HomeState {
         ]),
       ),
       SectionTitle('Водители · ${dayLabel(day).toLowerCase()}'),
+      const Padding(
+        padding: EdgeInsets.only(bottom: 8),
+        child: Text('Синие точки на карте — где водители ждут пассажиров. Подойдите туда к времени отправления.',
+            style: TextStyle(fontSize: 13, color: AppColors.muted)),
+      ),
       if (hours.length > 1) _hourChips(hours),
       if (list.isEmpty)
         const Padding(
@@ -262,7 +261,7 @@ extension SearchPanel on HomeState {
               child: ChoiceChip(
                 label: Text(h == null ? 'Любое время' : '${h.toString().padLeft(2, '0')}:00'),
                 selected: hour == h,
-                onSelected: (_) => update(() => hour = h),
+                onSelected: (_) => setHour(h),
               ),
             ),
         ]),
@@ -293,6 +292,11 @@ extension SearchPanel on HomeState {
                     if (d.verified) const TextSpan(text: '  ✓', style: TextStyle(color: _accent, fontWeight: FontWeight.w700)),
                   ])),
                   Text('${d.car}, ${d.carColor}', style: const TextStyle(fontSize: 13, color: AppColors.muted)),
+                  Row(children: [
+                    const Icon(Icons.directions_walk, size: 15, color: Color(0xFF2563EB)),
+                    const SizedBox(width: 2),
+                    Flexible(child: Text(meetText(walkTo(trip, m.geometry)), style: const TextStyle(fontSize: 13))),
+                  ]),
                   Text(
                     free > 0 ? 'свободно $free ${plural(free, 'место', 'места', 'мест')}' : 'мест нет',
                     style: TextStyle(fontSize: 13, color: free > 0 ? AppColors.ok : AppColors.danger),

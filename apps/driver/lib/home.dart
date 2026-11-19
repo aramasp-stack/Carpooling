@@ -116,7 +116,6 @@ class DriverHomeState extends State<DriverHome> {
   RouteGeometry? geoOf(Trip t) => geoms[t.route.id];
 
   List<Pax> paxOf(Trip t) {
-    final g = geoOf(t) ?? RouteGeometry.straight(t.route);
     final bookings = data.bookings();
     final list = <Pax>[];
     for (final s in t.seats.where((s) => s.taken)) {
@@ -124,9 +123,8 @@ class DriverHomeState extends State<DriverHome> {
       for (final x in bookings) {
         if (x.id == s.bookingId) b = x;
       }
-      final along = b?.pickAlong ?? (djb2(t.id + s.id) % 5) / 10 * g.length; // демо: где ждёт пассажир
-      final where = b?.fromName ?? (along < 50 ? 'у старта «${t.route.from.name}»' : 'по пути, ${meters(along)} от старта');
-      list.add(Pax(s, s.passenger ?? 'Пассажир', along, where));
+      // Все пассажиры садятся в месте посадки, которое задал водитель; по пути водитель не останавливается.
+      list.add(Pax(s, s.passenger ?? 'Пассажир', t.meetAlong, 'в месте посадки${b == null ? '' : ' (из приложения)'}'));
     }
     list.sort((a, b) => a.along.compareTo(b.along));
     return list;
@@ -147,7 +145,7 @@ class DriverHomeState extends State<DriverHome> {
         final g = t == null ? null : geoOf(t);
         if (t == null || g == null) return;
         map.showRoutes([MapRoute(t.route, g)]);
-        map.setMarker('start', t.route.from.point, MarkerKind.start);
+        map.setMarker('start', g.pointAt(t.meetAlong), MarkerKind.start);
         map.setMarker('finish', t.route.to.point, MarkerKind.finish);
         for (final p in paxOf(t)) {
           map.setMarker('pax-${p.seat.id}', g.pointAt(p.along), MarkerKind.passenger);

@@ -98,13 +98,20 @@ class Trip {
     required this.departure,
     required this.driver,
     required this.seats,
+    this.meetAlong = 0,
     this.custom = false,
   });
   final String id;
   final RouteDef route;
+
+  /// Время отправления от места посадки.
   final DateTime departure;
   final Driver driver;
   final List<Seat> seats;
+
+  /// Место посадки: метры от начала маршрута по его линии. Задаёт водитель в пределах начального района;
+  /// пассажиры приходят сюда сами, по пути водитель не останавливается.
+  final double meetAlong;
 
   /// Рейс создан водителем в приложении (а не взят из демо-расписания).
   final bool custom;
@@ -124,6 +131,7 @@ class CustomTrip {
     required this.time,
     required this.driverIndex,
     required this.seats,
+    this.meetAlong = 0,
   });
   final String id;
   final String routeId;
@@ -132,6 +140,9 @@ class CustomTrip {
   final int driverIndex;
   final List<Seat> seats;
 
+  /// Место посадки: метры от начала маршрута.
+  final double meetAlong;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'routeId': routeId,
@@ -139,6 +150,7 @@ class CustomTrip {
         'time': time,
         'driverIndex': driverIndex,
         'seats': seats.map((s) => s.toJson()).toList(),
+        'meetAlong': meetAlong,
       };
   factory CustomTrip.fromJson(Map<String, dynamic> j) => CustomTrip(
         id: j['id'] as String,
@@ -147,6 +159,7 @@ class CustomTrip {
         time: j['time'] as String,
         driverIndex: (j['driverIndex'] as num?)?.toInt() ?? 0,
         seats: (j['seats'] as List).map((e) => Seat.fromJson(e as Map<String, dynamic>)).toList(),
+        meetAlong: (j['meetAlong'] as num?)?.toDouble() ?? 0,
       );
 }
 

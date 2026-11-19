@@ -67,7 +67,14 @@ class TripService {
       final takenDemo = (seed >> 7) % total;
       final order = seats.map((s) => s.id).toList()..sort((a, b) => djb2(id + a).compareTo(djb2(id + b)));
       list.add(_finish(
-        Trip(id: id, route: route, departure: dep, driver: Demo.drivers[seed % Demo.drivers.length], seats: seats),
+        Trip(
+          id: id,
+          route: route,
+          departure: dep,
+          driver: Demo.drivers[seed % Demo.drivers.length],
+          seats: seats,
+          meetAlong: Demo.meetSpots[(seed >> 9) % Demo.meetSpots.length],
+        ),
         order.take(takenDemo).toSet(),
         bookings,
       ));
@@ -83,6 +90,7 @@ class TripService {
           departure: dep,
           driver: Demo.drivers[c.driverIndex],
           seats: c.seats.map((s) => s.copy()).toList(),
+          meetAlong: c.meetAlong,
           custom: true,
         ),
         const {},
@@ -111,10 +119,10 @@ class TripService {
             if (t.driver.name == driver.name) t,
       ]..sort((a, b) => a.departure.compareTo(b.departure));
 
-  /// Когда машина будет в точке маршрута (метры от начала).
+  /// Когда машина будет в точке маршрута (метры от начала). Отправление — от места посадки.
   DateTime timeAt(Trip t, double along, RouteGeometry? g) {
     final dur = g?.durationSec ?? t.route.minutes * 60.0;
-    final share = g == null ? 0.0 : along / g.length;
+    final share = g == null ? 0.0 : ((along - t.meetAlong) / g.length).clamp(0.0, 1.0);
     return t.departure.add(Duration(milliseconds: (dur * share * 1000).round()));
   }
 

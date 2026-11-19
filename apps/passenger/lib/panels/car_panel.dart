@@ -20,16 +20,16 @@ class _CarPanelState extends State<CarPanel> {
   @override
   Widget build(BuildContext context) {
     final h = widget.home, m = widget.match, t = widget.trip;
-    final pickAt = h.trips.timeAt(t, m.pick.along, m.geometry);
-    final dropAt = h.trips.timeAt(t, m.dropAlong, m.geometry);
+    final dropAt = h.trips.timeAt(t, m.geometry.length, m.geometry);
+    final walk = h.walkTo(t, m.geometry);
     final order = ['front', 'rl', 'rm', 'rr'].where(selected.contains).map((id) => _seat(id).label).join(', ');
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       BackLink('К водителям', onTap: h.pop),
       DriverCard(t.driver, color: Color(m.route.color)),
       TwoPoints(
-        from: 'Посадка рядом с вами${m.pick.distance >= 120 ? ' · ${meters(m.pick.distance)} пешком' : ''}',
-        fromTime: '≈ ${hhmm(pickAt)}',
-        to: m.drop != null ? 'Высадка рядом с «${h.to?.name ?? m.route.to.name}»' : m.route.to.name,
+        from: 'Место посадки (синяя точка на карте) · ${walk < 120 ? 'рядом с вами' : '${meters(walk)} пешком'}',
+        fromTime: hhmm(t.departure),
+        to: m.route.to.name,
         toTime: '≈ ${hhmm(dropAt)}',
       ),
       const SectionTitle('Выберите места'),
@@ -39,7 +39,7 @@ class _CarPanelState extends State<CarPanel> {
         color: _accent,
         onToggle: (id) => setState(() => selected.contains(id) ? selected.remove(id) : selected.add(id)),
       ),
-      const NoteBox('Где именно вас подобрать и высадить, договоритесь с водителем: его телефон появится в брони в день поездки.'),
+      const NoteBox('Водитель ждёт в месте посадки и отправляется по расписанию — подойдите заранее. По пути водитель не останавливается: высадка в конечной точке маршрута.'),
       PayBar(
         caption: selected.isEmpty ? 'Места не выбраны' : order,
         total: amd(total),
@@ -48,7 +48,7 @@ class _CarPanelState extends State<CarPanel> {
       ),
       const Padding(
         padding: EdgeInsets.only(top: 8),
-        child: Text('Бесплатная отмена — не позднее чем за 60 минут до посадки',
+        child: Text('Бесплатная отмена — не позднее чем за 60 минут до отправления',
             textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: AppColors.muted)),
       ),
     ]);
@@ -77,10 +77,10 @@ class _CarPanelState extends State<CarPanel> {
       id: 'B${DateTime.now().millisecondsSinceEpoch.toRadixString(36).toUpperCase()}',
       tripId: t.id,
       routeId: m.route.id,
-      pickAlong: m.pick.along,
-      dropAlong: m.dropAlong,
-      fromName: h.from?.name ?? m.route.from.name,
-      toName: h.to?.name ?? m.route.to.name,
+      pickAlong: t.meetAlong,
+      dropAlong: m.geometry.length,
+      fromName: '${m.route.from.name}, место посадки',
+      toName: m.route.to.name,
       seatIds: ids,
       seatLabels: ids.map((id) => _seat(id).label).toList(),
       amount: total,
