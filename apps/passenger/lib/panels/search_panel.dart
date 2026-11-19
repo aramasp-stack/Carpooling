@@ -19,13 +19,17 @@ extension SearchPanel on HomeState {
             _pickChip('from', 'Откуда на карте'),
             _pickChip('to', 'Куда на карте'),
           ]),
+          if (from == null) _recent(),
           const SizedBox(height: 8),
           Wrap(spacing: 8, children: [
             for (var d = 0; d < 3; d++)
               ChoiceChip(
                 label: Text(dayLabel(d)),
                 selected: day == d,
-                onSelected: (_) => update(() => day = d),
+                onSelected: (_) => update(() {
+                  day = d;
+                  hour = null;
+                }),
               ),
           ]),
           const SizedBox(height: 6),
@@ -45,6 +49,23 @@ extension SearchPanel on HomeState {
           if (pick != null) toast(context, which == 'from' ? 'Нажмите на карту, откуда поедете' : 'Нажмите на карту, куда поедете');
         },
       );
+
+  /// Последние маршруты пассажира: поиск в одно касание.
+  Widget _recent() {
+    final list = recentRoutes;
+    if (list.isEmpty) return const SizedBox.shrink();
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      const SectionTitle('Недавние маршруты', top: 12),
+      Wrap(spacing: 8, runSpacing: 8, children: [
+        for (final r in list)
+          ActionChip(
+            avatar: Icon(Icons.history, size: 16, color: Color(r.color)),
+            label: Text('${r.from.name} → ${r.to.name}'),
+            onPressed: () => repeatRoute(r),
+          ),
+      ]),
+    ]);
+  }
 
   Widget _whereRow(String which) {
     final ctl = which == 'from' ? fromCtl : toCtl;
@@ -142,14 +163,18 @@ extension SearchPanel on HomeState {
       return Padding(
         padding: const EdgeInsets.all(18),
         child: Text(
-          'Рядом с этой точкой нет маршрутов${to != null ? ' в нужную сторону' : ''}. Попробуйте другую точку или посмотрите вкладку «Маршруты».',
+          'Рядом с этой точкой нет маршрутов${to != null ? ' в нужную сторону' : ''}. Попробуйте другую точку.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: AppColors.muted),
         ),
       );
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      SectionTitle('Маршруты рядом: ${m.length}', top: 10),
+      SectionTitle('Куда можно уехать отсюда: ${m.length}', top: 10),
+      const Padding(
+        padding: EdgeInsets.only(bottom: 8),
+        child: Text('Выберите в списке или нажмите на линию маршрута на карте.', style: TextStyle(fontSize: 13, color: AppColors.muted)),
+      ),
       for (final x in m) _routeCard(x),
     ]);
   }
@@ -166,26 +191,28 @@ extension SearchPanel on HomeState {
         contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 4),
         leading: Swatch(Color(m.route.color)),
         minLeadingWidth: 12,
-        title: Text(m.route.title, style: const TextStyle(fontWeight: FontWeight.w600)),
-        subtitle: Text('${_walk(m)} · в пути ~${minutesText(m.geometry.trafficSec ?? m.geometry.durationSec)}\n'
+        title: Text(m.route.to.name, style: const TextStyle(fontWeight: FontWeight.w600)),
+        subtitle: Text('из «${m.route.from.name}» · ${_walk(m)} · в пути ~${minutesText(m.geometry.trafficSec ?? m.geometry.durationSec)}\n'
             '${n > 0 ? '$n ${plural(n, 'рейс', 'рейса', 'рейсов')} со свободными местами · ${dayLabel(day).toLowerCase()}' : 'свободных мест нет'}'),
         isThreeLine: true,
         trailing: const Icon(Icons.chevron_right),
-        onTap: () {
-          update(() => routeId = m.route.id);
-          syncMap();
-        },
+        onTap: () => chooseRoute(m.route.id),
       ),
     );
   }
 
   Widget _drivers(RouteMatch m, int total) {
-    final list = driversFor(m);
+    final all = driversFor(m);
+    final hours = {for (final x in all) x.at.hour}.toList()..sort();
+    final list = hour == null ? all : all.where((x) => x.at.hour == hour).toList();
     final g = m.geometry;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       if (to == null && total > 1)
-        BackLink('Все маршруты рядом', onTap: () {
-          update(() => routeId = null);
+        BackLink('Все направления отсюда', onTap: () {
+          update(() {
+            routeId = null;
+            hour = null;
+          });
           syncMap();
         }),
       Container(
@@ -214,6 +241,7 @@ extension SearchPanel on HomeState {
         ]),
       ),
       SectionTitle('Водители · ${dayLabel(day).toLowerCase()}'),
+      if (hours.length > 1) _hourChips(hours),
       if (list.isEmpty)
         const Padding(
           padding: EdgeInsets.all(12),
@@ -222,6 +250,23 @@ extension SearchPanel on HomeState {
       for (final x in list) _driverRow(m, x.trip, x.at),
     ]);
   }
+
+  /// Выбор часа отправления: только часы, в которые есть рейсы.
+  Widget _hourChips(List<int> hours) => SingleChildScrollView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Row(children: [
+          for (final h in [null, ...hours])
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ChoiceChip(
+                label: Text(h == null ? 'Любое время' : '${h.toString().padLeft(2, '0')}:00'),
+                selected: hour == h,
+                onSelected: (_) => update(() => hour = h),
+              ),
+            ),
+        ]),
+      );
 
   Widget _driverRow(RouteMatch m, Trip trip, DateTime at) {
     final d = trip.driver;

@@ -36,11 +36,6 @@ extension TrackPanel on HomeState {
         borderRadius: BorderRadius.circular(6),
         child: LinearProgressIndicator(value: simPos / g.length, minHeight: 6, color: _accent, backgroundColor: AppColors.surface),
       ),
-      const SectionTitle('Скорость симуляции'),
-      Wrap(spacing: 8, children: [
-        for (final f in [1.0, 10.0, 30.0])
-          ChoiceChip(label: Text('×${f.round()}'), selected: simFactor == f, onSelected: (_) => update(() => simFactor = f)),
-      ]),
       if (simDone && b != null && b.status == BookingStatus.done) rating(b),
     ]);
   }

@@ -9,12 +9,11 @@ part 'panels/search_panel.dart';
 part 'panels/car_panel.dart';
 part 'panels/ticket_panel.dart';
 part 'panels/track_panel.dart';
-part 'panels/routes_panel.dart';
 part 'panels/mine_panel.dart';
 
 const _accent = AppColors.passenger;
 
-enum HomeTab { search, routes, mine }
+enum HomeTab { search, mine }
 
 /// Что сейчас показано в панели.
 sealed class Pane {}
@@ -37,8 +36,6 @@ class TrackPane extends Pane {
   final Trip trip;
   final String? bookingId;
 }
-
-class RoutesPane extends Pane {}
 
 class MinePane extends Pane {}
 
@@ -64,6 +61,7 @@ class HomeState extends State<HomeScreen> {
   Place? to;
   String? routeId; // маршрут, выбранный из списка, когда указано только «откуда»
   int day = 0;
+  int? hour; // час отправления; null — любой
   String? pick; // 'from' | 'to' — ждём нажатия на карту
   final fromCtl = TextEditingController();
   final toCtl = TextEditingController();
@@ -128,7 +126,6 @@ class HomeState extends State<HomeScreen> {
       stack = [
         switch (t) {
           HomeTab.search => SearchPane(),
-          HomeTab.routes => RoutesPane(),
           HomeTab.mine => MinePane(),
         },
         ?open,
@@ -161,6 +158,7 @@ class HomeState extends State<HomeScreen> {
         toCtl.text = p?.name ?? '';
       }
       routeId = null;
+      hour = null;
       suggestions = [];
       suggestFor = null;
     });
@@ -168,11 +166,58 @@ class HomeState extends State<HomeScreen> {
     syncMap();
   }
 
+  /// Выбрать маршрут из найденных (из списка или касанием линии на карте).
+  void chooseRoute(String id) {
+    update(() {
+      routeId = id;
+      hour = null;
+    });
+    syncMap();
+  }
+
   void onMapTap(GeoPoint p) {
     final which = pick;
-    if (which == null) return;
+    if (which == null) {
+      _tapRoute(p);
+      return;
+    }
     update(() => pick = null);
     setPlace(which, Place('Точка на карте', p));
+  }
+
+  /// Касание линии маршрута на карте выбирает этот маршрут, когда показаны все маршруты рядом.
+  void _tapRoute(GeoPoint p) {
+    if (pane is! SearchPane || from == null || to != null || routeId != null) return;
+    RouteMatch? best;
+    var bestDist = _routeTapMeters;
+    for (final m in matches) {
+      final d = m.geometry.nearest(p).distance;
+      if (d < bestDist) {
+        best = m;
+        bestDist = d;
+      }
+    }
+    if (best != null) chooseRoute(best.route.id);
+  }
+
+  static const _routeTapMeters = 400.0;
+
+  /// Последние маршруты пассажира (по его броням), не больше трёх.
+  List<RouteDef> get recentRoutes {
+    final out = <RouteDef>[];
+    for (final b in data.bookings()) {
+      final r = Demo.routeById(b.routeId);
+      if (r != null && !out.any((x) => x.id == r.id)) out.add(r);
+      if (out.length == 3) break;
+    }
+    return out;
+  }
+
+  /// Поиск по недавнему маршруту: «откуда» — начало маршрута, сразу список рейсов на нём.
+  void repeatRoute(RouteDef r) {
+    setPlace('to', null);
+    setPlace('from', r.from);
+    chooseRoute(r.id);
   }
 
   Future<void> locateMe() async {
@@ -255,13 +300,6 @@ class HomeState extends State<HomeScreen> {
           map.setMarker('pickup', g.pointAt(b.pickAlong), MarkerKind.pickup);
         }
         map.fit(g.points);
-      case RoutesPane():
-        map.showRoutes([for (final r in Demo.routes) if (geoms[r.id] != null) MapRoute(r, geoms[r.id]!)]);
-        for (final r in Demo.routes) {
-          map.setMarker('s-${r.from.name}', r.from.point, MarkerKind.start);
-          map.setMarker('f-${r.to.name}', r.to.point, MarkerKind.finish);
-        }
-        map.fit([for (final g in geoms.values) ...g.points]);
       case MinePane():
         break;
     }
@@ -316,7 +354,6 @@ class HomeState extends State<HomeScreen> {
         CarPane(:final match, :final trip) => CarPanel(home: this, match: match, trip: trip),
         TicketPane(:final bookingId) => ticketPanel(bookingId),
         TrackPane(:final trip, :final bookingId) => trackPanel(trip, bookingId),
-        RoutesPane() => routesPanel(),
         MinePane() => minePanel(),
       };
 
@@ -335,7 +372,6 @@ class HomeState extends State<HomeScreen> {
           onDestinationSelected: (i) => goTab(HomeTab.values[i]),
           destinations: const [
             NavigationDestination(icon: Icon(Icons.search), label: 'Поиск'),
-            NavigationDestination(icon: Icon(Icons.alt_route), label: 'Маршруты'),
             NavigationDestination(icon: Icon(Icons.confirmation_number_outlined), label: 'Мои поездки'),
           ],
         ),
