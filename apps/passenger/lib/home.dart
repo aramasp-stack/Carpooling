@@ -395,7 +395,7 @@ class HomeState extends State<HomeScreen> {
     final known = myPos;
     if (known != null) {
       if (pane is! SearchPane) goTab(HomeTab.search);
-      setPlace('from', Place('Моё местоположение', known));
+      setPlace('from', Place('Я здесь', known));
       return;
     }
     toast(context, 'Определяем местоположение…');
@@ -411,7 +411,7 @@ class HomeState extends State<HomeScreen> {
     }
     update(() => myPos = p);
     if (pane is! SearchPane) goTab(HomeTab.search);
-    setPlace('from', Place('Моё местоположение', p));
+    setPlace('from', Place('Я здесь', p));
   }
 
   List<({Trip trip, DateTime at})> driversFor(RouteMatch m) {

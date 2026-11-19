@@ -82,13 +82,20 @@ extension SearchPanel on HomeState {
             filled: false,
             isDense: true,
           ),
-          onTap: () => update(() {
-            suggestFor = which;
-            // Поле уже заполнено: показываем весь список, а текст выделяем, чтобы ввод его заменил.
-            if (value != null) ctl.selection = TextSelection(baseOffset: 0, extentOffset: ctl.text.length);
-            suggestQuery = value != null ? '' : ctl.text;
-            suggestions = localPlaces(suggestQuery);
-          }),
+          onTap: () {
+            // Повторное касание складывает открытый список.
+            if (suggestFor == which) {
+              closeSuggest();
+              return;
+            }
+            update(() {
+              suggestFor = which;
+              // Поле уже заполнено: показываем весь список, а текст выделяем, чтобы ввод его заменил.
+              if (value != null) ctl.selection = TextSelection(baseOffset: 0, extentOffset: ctl.text.length);
+              suggestQuery = value != null ? '' : ctl.text;
+              suggestions = localPlaces(suggestQuery);
+            });
+          },
           onChanged: (t) => update(() {
             suggestFor = which;
             suggestQuery = t;
@@ -102,6 +109,24 @@ extension SearchPanel on HomeState {
           onPressed: () => setPlace(which, null),
           visualDensity: VisualDensity.compact,
         ),
+      // У «Откуда» всегда под рукой: своё местоположение и выбор на карте.
+      if (which == 'from') ...[
+        IconButton(
+          tooltip: 'Моё местоположение',
+          icon: const Icon(Icons.my_location, size: 22, color: _accent),
+          onPressed: () {
+            closeSuggest();
+            locateMe();
+          },
+          visualDensity: VisualDensity.compact,
+        ),
+        IconButton(
+          tooltip: 'Выбрать на карте',
+          icon: const Icon(Icons.map_outlined, size: 22, color: _accent),
+          onPressed: () => startPick('from'),
+          visualDensity: VisualDensity.compact,
+        ),
+      ],
     ]);
   }
 
@@ -139,24 +164,18 @@ extension SearchPanel on HomeState {
         margin: const EdgeInsets.only(top: 6),
         decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
         child: Column(children: [
-          // Первые строки: своё местоположение (только для «откуда») и выбор на карте.
-          if (suggestFor == 'from')
+          // У «Откуда» эти кнопки — справа в самой строке; для «Куда» выбор на карте — первой строкой.
+          if (suggestFor == 'to') ...[
             ListTile(
               dense: true,
-              leading: const Icon(Icons.my_location, size: 20, color: _accent),
-              title: const Text('Моё местоположение', style: TextStyle(fontWeight: FontWeight.w600)),
-              onTap: () {
-                closeSuggest();
-                locateMe();
-              },
+              leading: const Icon(Icons.map_outlined, size: 20, color: _accent),
+              title: const Text('Выбрать на карте', style: TextStyle(fontWeight: FontWeight.w600)),
+              onTap: () => startPick('to'),
             ),
-          ListTile(
-            dense: true,
-            leading: const Icon(Icons.map_outlined, size: 20, color: _accent),
-            title: const Text('Выбрать на карте', style: TextStyle(fontWeight: FontWeight.w600)),
-            onTap: () => startPick(suggestFor ?? 'from'),
-          ),
-          if (suggestions.isNotEmpty) const Divider(height: 1),
+            if (suggestions.isNotEmpty) const Divider(height: 1),
+          ],
+          if (suggestFor == 'from' && suggestions.isEmpty)
+            const ListTile(dense: true, title: Text('Ничего не найдено', style: TextStyle(color: AppColors.muted))),
           for (final p in suggestions)
             ListTile(
               dense: true,
@@ -213,7 +232,7 @@ extension SearchPanel on HomeState {
             child: Text.rich(TextSpan(children: [
               TextSpan(text: 'Откуда поедете?\n', style: TextStyle(fontWeight: FontWeight.w700)),
               TextSpan(
-                text: 'Нажмите на поле «Откуда» и выберите место из списка, своё местоположение или точку на карте — покажем, куда можно уехать.',
+                text: 'Выберите место из списка в поле «Откуда» или нажмите справа в этой строке: своё местоположение или точку на карте — покажем, куда можно уехать.',
                 style: TextStyle(fontSize: 13, color: AppColors.muted),
               ),
             ])),
