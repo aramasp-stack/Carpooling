@@ -79,6 +79,9 @@ class Actor {
   /// Карта, привязанная при создании (если просили).
   String? cardId;
 
+  /// Сколько времени назад человек вводил код из SMS (для действий, где нужен свежий вход).
+  Duration smsAge = Duration.zero;
+
   Future<Connection> _connection() async => _conn ??= await _open(world.database);
 
   /// Запрос от имени пользователя: роль authenticated + его токен входа.
@@ -89,7 +92,16 @@ class Actor {
         await s.execute('set local role authenticated');
         await s.execute(
           Sql.named("select set_config('request.jwt.claims', @c, true)"),
-          parameters: {'c': jsonEncode({'sub': id, 'phone': phone, 'role': 'authenticated'})},
+          parameters: {
+            'c': jsonEncode({
+              'sub': id,
+              'phone': phone,
+              'role': 'authenticated',
+              'amr': [
+                {'method': 'otp', 'timestamp': DateTime.now().subtract(smsAge).millisecondsSinceEpoch ~/ 1000}
+              ],
+            })
+          },
         );
         return s.execute(Sql.named(sql), parameters: params);
       });
@@ -132,6 +144,17 @@ class Actor {
       Map<String, dynamic>.from(await one('select cancel_booking(@b::uuid)', {'b': bookingId}) as Map);
 
   // ---------- действия водителя ----------
+
+  /// Загрузить все пять документов для проверки (в облаке файлы лежат в хранилище, здесь — только записи).
+  Future<void> uploadDocuments() async {
+    for (final k in const ['id_document', 'license', 'registration', 'car_photo', 'selfie']) {
+      await q('select driver_save_document(@k, @p)', {'k': k, 'p': '$id/$k.jpg'});
+    }
+  }
+
+  /// Привязать карту для выплат (симуляция банка).
+  Future<String> setPayoutCard([String number = '4111111111111111']) async =>
+      await one('select driver_set_payout_card_sim(@n, @h)', {'n': number, 'h': name}) as String;
 
   Future<String> createTrip(String routeId, DateTime departure, {int meet = 0, Map<String, int>? seats}) async {
     final list = (seats ?? {'front': 600, 'rl': 500, 'rr': 500}).entries.map((e) => {'id': e.key, 'price': e.value}).toList();
@@ -201,6 +224,8 @@ class World {
     final a = await newUser(name);
     await a.q('select apply_driver(@c, @k, @p, @s::int, @t)',
         {'c': 'Toyota Camry', 'k': 'белая', 'p': '35 OO ${100 + _seq}', 's': '$seats', 't': '0${1000000 + _seq}'});
+    await a.uploadDocuments();
+    await a.setPayoutCard();
     if (approve) await verifier.q('select staff_review_driver(@d::uuid, true)', {'d': a.id});
     return a;
   }

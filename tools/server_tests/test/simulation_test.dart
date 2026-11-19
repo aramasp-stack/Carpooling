@@ -103,6 +103,17 @@ void main() {
           }
           await act('финиш рейса', () => d.q('select driver_finish_trip(@t::uuid)', {'t': t}));
         }
+      } else if (dice < 97 && rnd.nextBool()) {
+        // водитель блокирует или разблокирует пассажира, с которым ездил, либо меняет карту для выплат
+        final d = pick(drivers);
+        final rows = await w.admin.execute(
+            "select b.passenger_id::text from bookings b join trips t on t.id = b.trip_id where t.driver_id = '${d.id}' and b.status <> 'failed' order by random() limit 1");
+        if (rnd.nextInt(4) == 0) {
+          await act('смена карты для выплат', () => d.setPayoutCard('555555555555${1000 + rnd.nextInt(9000)}'));
+        } else if (rows.isNotEmpty) {
+          final fn = rnd.nextInt(3) == 0 ? 'driver_unblock_passenger' : 'driver_block_passenger';
+          await act(fn == 'driver_block_passenger' ? 'блокировка' : 'разблокировка', () => d.q('select $fn(@p::uuid)', {'p': rows.first.first}));
+        }
       } else if (dice < 98) {
         // пассажир оценивает поездку
         final rows = await w.admin.execute("select id::text, passenger_id::text from bookings where status = 'done' and rating is null order by random() limit 1");

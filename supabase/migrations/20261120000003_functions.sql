@@ -308,6 +308,10 @@ begin
   select status into st from drivers where user_id = p_driver for no key update;
   if not found then raise exception 'DRIVER_NOT_FOUND'; end if;
   if st = 'blocked' then raise exception 'DRIVER_BLOCKED'; end if;
+  -- Одобрить можно только анкету со всеми документами.
+  if p_approve and (select count(*) from driver_documents where driver_id = p_driver) < 5 then
+    raise exception 'DOCUMENTS_MISSING';
+  end if;
   update drivers set status = case when p_approve then 'approved' else 'rejected' end::driver_status,
     reject_reason = case when p_approve then null else _trim(p_reason) end,
     reviewed_by = u, reviewed_at = now()
@@ -458,7 +462,7 @@ end $$;
 
 -- Пассажиры рейса для водителя: место, имя, отметка. Без телефонов.
 create function public.trip_passengers(p_trip uuid)
-returns table (seat_id text, passenger_name text, booking_id uuid, boarding text)
+returns table (seat_id text, passenger_id uuid, passenger_name text, passenger_rating numeric, booking_id uuid, boarding text)
 language plpgsql stable security definer set search_path = public, pg_temp as $$
 declare u uuid := _uid();
 begin
@@ -466,7 +470,7 @@ begin
     raise exception 'FORBIDDEN';
   end if;
   return query
-    select s.seat_id, p.name, s.booking_id, s.boarding
+    select s.seat_id, p.id, p.name, p.passenger_rating, s.booking_id, s.boarding
     from trip_seats s
     join bookings b on b.id = s.booking_id
     join profiles p on p.id = b.passenger_id
@@ -559,6 +563,10 @@ begin
     raise exception 'TRIP_CLOSED';
   end if;
   if t.driver_id = u then raise exception 'OWN_TRIP'; end if;
+  -- Пассажир, которого водитель заблокировал, рейса «не находит» (о блокировке ему не сообщается).
+  if exists (select 1 from driver_blocks where driver_id = t.driver_id and passenger_id = u) then
+    raise exception 'TRIP_NOT_FOUND';
+  end if;
 
   select count(*), count(booking_id), coalesce(sum(price), 0) into v_count, v_taken, v_amount
   from trip_seats where trip_id = p_trip and seat_id = any (p_seats);
@@ -741,6 +749,8 @@ begin
 end $$;
 
 -- Сформировать выплаты: каждому водителю всё начисленное и ещё не выплаченное.
+-- Выплата идёт только на действующую карту для выплат. Нет карты (или новая ещё не вступила в силу) — деньги ждут.
+
 create function public.finance_create_payouts() returns int
 language plpgsql security definer set search_path = public, pg_temp as $$
 declare
@@ -750,6 +760,7 @@ declare
   made int := 0;
   v_left bigint;
   v_part int;
+  v_card uuid;
 begin
   lock table payouts in share row exclusive mode;     -- два финансиста не создадут выплаты дважды
   for r in
@@ -758,10 +769,13 @@ begin
     from ledger where driver_id is not null and kind in ('driver_accrual', 'payout')
     group by driver_id
   loop
+    select id into v_card from payout_cards
+    where driver_id = r.driver_id and removed_at is null and active_from <= app_now();
+    continue when v_card is null;
     v_left := r.due;
     while v_left > 0 loop                              -- одна выплата — не больше 2 млрд драм, остальное следующей
       v_part := least(v_left, 2000000000)::int;
-      insert into payouts (driver_id, amount, created_by) values (r.driver_id, v_part, u) returning id into pid;
+      insert into payouts (driver_id, amount, created_by, card_id) values (r.driver_id, v_part, u, v_card) returning id into pid;
       insert into ledger (kind, amount, driver_id, payout_id) values ('payout', v_part, r.driver_id, pid);
       made := made + 1;
       v_left := v_left - v_part;

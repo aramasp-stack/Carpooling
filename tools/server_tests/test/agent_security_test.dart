@@ -124,8 +124,13 @@ void main() {
         'driver_start_trip', 'finance_create_payouts', 'finance_mark_paid', 'has_role', 'rate_booking',
         'register_profile', 'remove_card', 'setting_int', 'staff_block_user', 'staff_refund_booking', 'staff_review_driver',
         'staff_save_route', 'staff_set_roles', 'staff_set_route_status', 'trip_passengers',
+        // водитель: документы, карта для выплат, блокировки, заявки на маршруты, оценка пассажиров
+        'driver_block_passenger', 'driver_blocked_passengers', 'driver_rate_passenger', 'driver_request_route',
+        'driver_save_document', 'driver_set_payout_card_sim', 'driver_unblock_passenger', 'staff_review_route_request',
+        // нужна правилу видимости рейсов (заблокированный пассажир не видит рейсов водителя)
+        '_can_see_trip',
       ];
-      expect((await executable('authenticated')).split(','), allowed);
+      expect((await executable('authenticated')).split(',').toSet(), allowed.toSet());
       expect(await executable('anon'), '', reason: 'без входа нельзя вызвать ни одну функцию');
     });
 
@@ -341,10 +346,12 @@ void main() {
 
   // =====================================================================================================
   group('водитель и его пассажиры', () {
-    test('список пассажиров: только место, имя, номер брони и отметка', () async {
+    // ПРАВИЛО: номер пассажира (id) и его общий рейтинг нужны водителю, чтобы заблокировать и оценить.
+    test('список пассажиров: только место, имя, номер и рейтинг пассажира, номер брони и отметка', () async {
       final list = await driver.q('select * from trip_passengers(@t::uuid)', {'t': trip});
       expect(list, hasLength(2));
-      expect(list.first.toColumnMap().keys.toSet(), {'seat_id', 'passenger_name', 'booking_id', 'boarding'});
+      expect(list.first.toColumnMap().keys.toSet(),
+          {'seat_id', 'passenger_id', 'passenger_name', 'passenger_rating', 'booking_id', 'boarding'});
       expect(list.map((r) => r.toColumnMap()['passenger_name']).toSet(), {'Ани', 'Боб'});
       expect(await driver.refusal('select phone from trip_passengers(@t::uuid)', {'t': trip}), noColumn);
     });

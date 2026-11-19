@@ -95,6 +95,10 @@ const invariants = <String, String>{
     ) then 0 else 1 end''',
   'минимальная цена маршрута — от 1 до его базовой цены': '''
     select count(*) from routes where min_price < 1 or min_price > base_price''',
+  'у одобренного водителя загружены все пять документов': '''
+    select count(*) from drivers d where d.status = 'approved' and (select count(*) from driver_documents x where x.driver_id = d.user_id) < 5''',
+  'выплата уходит только на карту самого водителя': '''
+    select count(*) from payouts p left join payout_cards c on c.id = p.card_id where c.id is null or c.driver_id <> p.driver_id''',
   'место рейса есть в машине водителя': '''
     select count(*) from trip_seats s join trips t on t.id = s.trip_id join drivers d on d.user_id = t.driver_id
     where s.seat_id = 'rm' and d.seats_total = 3 and t.status in ('planned', 'started')''',
