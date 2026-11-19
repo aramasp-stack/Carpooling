@@ -159,6 +159,8 @@ class HomeState extends State<HomeScreen> {
       }
       routeId = null;
       hour = null;
+      // В «Куда» могло стоять название маршрута, выбранного раньше; без выбора оно лишнее.
+      if (to == null) toCtl.text = '';
       suggestions = [];
       suggestFor = null;
     });
