@@ -84,8 +84,12 @@ void main() {
         await act('отмена рейса', () => d.q('select driver_cancel_trip(@t::uuid)', {'t': rows.first[0]}));
       } else if (dice < 96) {
         // водитель ведёт рейс: начать, отметить пассажиров, завершить
+        // Обычно водитель берёт рейс, который уже идёт или которому пора начаться; иногда — любой (сервер должен отказать).
+        final due = rnd.nextInt(5) == 0
+            ? "status in ('planned', 'started')"
+            : "status = 'started' or (status = 'planned' and app_now() between departure - interval '15 minutes' and ends_at)";
         final rows = await w.admin.execute(
-            "select id::text, driver_id::text, status::text from trips where status in ('planned', 'started') order by departure limit 3");
+            'select id::text, driver_id::text, status::text from trips where $due order by random() limit 3');
         if (rows.isEmpty) return;
         final row = pick(rows);
         final d = drivers.firstWhere((x) => x.id == row[1]);

@@ -22,13 +22,13 @@ insert into public.app_settings (key, value) values
   ('clock_offset_seconds', '0');      -- только для тестов: сдвиг «часов» сервера
 
 create function public.setting_int(k text) returns int
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = public, pg_temp as $$
   select (value #>> '{}')::int from app_settings where key = k
 $$;
 
 -- «Сейчас» для всех правил. В тестах часы сдвигаются настройкой clock_offset_seconds.
 create function public.app_now() returns timestamptz
-language sql stable security definer set search_path = public as $$
+language sql stable security definer set search_path = public, pg_temp as $$
   select now() + make_interval(secs => coalesce((select (value #>> '{}')::double precision from app_settings where key = 'clock_offset_seconds'), 0))
 $$;
 
@@ -79,9 +79,9 @@ create table public.routes (
   to_name text not null,
   to_lat double precision not null,
   to_lon double precision not null,
-  base_price int not null check (base_price > 0),      -- базовая цена места, драм
-  minutes int not null check (minutes > 0),            -- время в пути по расписанию
-  length_m int not null check (length_m > 0),          -- длина по дорогам, метры
+  base_price int not null check (base_price between 1 and 1000000),      -- базовая цена места, драм
+  minutes int not null check (minutes between 1 and 600),            -- время в пути по расписанию
+  length_m int not null check (length_m between 100 and 200000),          -- длина по дорогам, метры
   color bigint not null default 4283388645,            -- цвет линии, 0xAARRGGBB
   status public.route_status not null default 'draft',
   created_by uuid references public.profiles (id),
@@ -128,7 +128,7 @@ create table public.bookings (
   id uuid primary key default gen_random_uuid(),
   trip_id uuid not null references public.trips (id),
   passenger_id uuid not null references public.profiles (id),
-  seat_ids text[] not null check (cardinality(seat_ids) between 1 and 4),
+  seat_ids text[] not null check (array_ndims(seat_ids) = 1 and cardinality(seat_ids) between 1 and 4),
   amount int not null check (amount > 0),
   status public.booking_status not null,
   refund int not null default 0 check (refund >= 0),
@@ -225,3 +225,19 @@ create trigger audit_append_only before update or delete on public.audit_log
   for each row execute function public._forbid_change();
 create trigger audit_no_truncate before truncate on public.audit_log
   for each statement execute function public._forbid_change();
+
+-- Проценты: каждый от 0 до 100, в сумме не больше 100 — иначе водителю уходит отрицательная доля.
+create function public._check_settings() returns trigger language plpgsql as $$
+begin
+  if exists (
+       select 1 from public.app_settings
+       where key in ('commission_percent', 'state_percent') and (value #>> '{}')::int not between 0 and 100)
+     or (select coalesce(sum((value #>> '{}')::int), 0) from public.app_settings
+         where key in ('commission_percent', 'state_percent')) > 100 then
+    raise exception 'BAD_SETTINGS: комиссия и госпошлина — от 0 до 100 %% и вместе не больше 100 %%';
+  end if;
+  return null;
+end $$;
+
+create trigger settings_check after insert or update on public.app_settings
+  for each statement execute function public._check_settings();

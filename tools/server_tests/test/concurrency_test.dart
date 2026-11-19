@@ -111,6 +111,8 @@ void main() {
     final driver = await w.newDriver('Тигран');
     final trip = await driver.createTrip(route, await inMinutes(60));
     await crowd[1].book(trip, ['front']);
+    await w.advance(const Duration(minutes: 55));
+    await driver.q('select driver_start_trip(@t::uuid)', {'t': trip});
     await w.advance(const Duration(hours: 30));
     await w.scalar('select accrue_due()');
     final f2 = await w.newStaff('Финансист 2', ['finance']);

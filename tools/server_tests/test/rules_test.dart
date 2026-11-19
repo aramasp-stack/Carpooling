@@ -39,6 +39,9 @@ void main() {
     await driver.q("select driver_mark_boarding(@t::uuid, 'front', 'boarded')", {'t': trip});
     await driver.q("select driver_mark_boarding(@t::uuid, 'rl', 'boarded')", {'t': trip});
     expect(await driver.refusal("select driver_mark_boarding(@t::uuid, 'rr', 'boarded')", {'t': trip}), 'SEAT_NOT_BOOKED');
+    // Завершить рейс до времени отправления нельзя: пассажиры ещё вправе ждать выезда.
+    expect(await driver.refusal('select driver_finish_trip(@t::uuid)', {'t': trip}), 'TOO_EARLY');
+    await w.advance(const Duration(minutes: 15));
     await driver.q('select driver_finish_trip(@t::uuid)', {'t': trip});
     expect(await pass.one('select status::text from bookings where id = @b::uuid', {'b': r['booking_id']}), 'done');
 
@@ -198,16 +201,62 @@ void main() {
         {'r': r2, 'd': (await inMinutes(120)).toUtc().toIso8601String(), 's': '[{"id":"front","price":600}]'}), 'ROUTE_NOT_AVAILABLE');
   });
 
-  test('рейс, который водитель забыл завершить, закрывается сам и начисляется', () async {
+  test('рейс начат, но водитель забыл его завершить: закрывается сам и начисляется', () async {
     final driver = await w.newDriver('Ашот');
     final pass = await w.newPassenger('Забытый');
     final trip = await driver.createTrip(route, await inMinutes(60));
     final b = await pass.book(trip, ['front']);
+    await w.advance(const Duration(minutes: 55));
+    await driver.q('select driver_start_trip(@t::uuid)', {'t': trip});
     await w.advance(const Duration(hours: 30));
     await w.scalar('select accrue_due()');
     expect(await w.scalar('select status::text from trips where id = @t::uuid', {'t': trip}), 'finished');
     expect(await w.scalar('select status::text from bookings where id = @b::uuid', {'b': b['booking_id']}), 'done');
     expect((await driver.one('select driver_earnings()') as Map)['accrued'], MoneySplit.of(600).driver);
+  });
+
+  test('рейс так и не начался: отменяется сам, пассажирам полный возврат, водителю ничего', () async {
+    final driver = await w.newDriver('Непришедший');
+    final pass = await w.newPassenger('Ждавший');
+    final late = await w.newPassenger('Отменивший поздно');
+    final trip = await driver.createTrip(route, await inMinutes(50));
+    final b1 = await pass.book(trip, ['front']);
+    final b2 = await late.book(trip, ['rl']);
+    expect((await late.cancel(b2['booking_id'] as String))['refund'], 0);
+    await w.advance(const Duration(hours: 30));
+    await w.scalar('select accrue_due()');
+    expect(await w.scalar('select status::text from trips where id = @t::uuid', {'t': trip}), 'cancelled');
+    expect(await w.scalar('select refund from bookings where id = @b::uuid', {'b': b1['booking_id']}), 600);
+    expect(await w.scalar('select refund from bookings where id = @b::uuid', {'b': b2['booking_id']}), 500);
+    expect((await driver.one('select driver_earnings()') as Map)['accrued'], 0);
+  });
+
+  test('жалоба: поддержка возвращает деньги после рейса, пока доля водителя не начислена', () async {
+    final driver = await w.newDriver('Спорный');
+    final pass = await w.newPassenger('Недовольный');
+    final trip = await driver.createTrip(route, await inMinutes(60));
+    final b = await pass.book(trip, ['front']);
+    await w.advance(const Duration(minutes: 55));
+    await driver.q('select driver_start_trip(@t::uuid)', {'t': trip});
+    await w.advance(const Duration(minutes: 30));
+    await driver.q('select driver_finish_trip(@t::uuid)', {'t': trip});
+    const fn = 'select staff_refund_booking(@b::uuid, @r)';
+    expect(await pass.refusal(fn, {'b': b['booking_id'], 'r': 'хочу'}), 'FORBIDDEN');
+    expect(await w.support.refusal(fn, {'b': b['booking_id'], 'r': ' '}), 'REASON_REQUIRED');
+    expect(await w.support.one(fn, {'b': b['booking_id'], 'r': 'водитель не довёз'}), 600);
+    expect(await w.support.refusal(fn, {'b': b['booking_id'], 'r': 'ещё раз'}), 'NOTHING_TO_REFUND');
+    await w.advance(const Duration(hours: 25));
+    await w.scalar('select accrue_due()');
+    expect((await driver.one('select driver_earnings()') as Map)['accrued'], 0);
+
+    // После начисления возврат через эту функцию уже невозможен.
+    final trip2 = await driver.createTrip(route, await inMinutes(60));
+    final b2 = await pass.book(trip2, ['front']);
+    await w.advance(const Duration(minutes: 55));
+    await driver.q('select driver_start_trip(@t::uuid)', {'t': trip2});
+    await w.advance(const Duration(hours: 30));
+    await w.scalar('select accrue_due()');
+    expect(await w.support.refusal(fn, {'b': b2['booking_id'], 'r': 'поздно'}), 'ALREADY_ACCRUED');
   });
 
   test('журнал денег и журнал действий нельзя править даже серверу', () async {

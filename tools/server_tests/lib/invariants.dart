@@ -75,6 +75,24 @@ const invariants = <String, String>{
   'в завершённом рейсе не осталось броней «оплачено»': '''
     select count(*) from bookings b join trips t on t.id = b.trip_id
     where t.status = 'finished' and b.status = 'paid' ''',
+  'у водителя не больше одного начатого рейса': '''
+    select count(*) from (select driver_id from trips where status = 'started' group by driver_id having count(*) > 1) x''',
+  'рейс не завершён раньше, чем начат': '''
+    select count(*) from trips where started_at is not null and finished_at is not null and finished_at < started_at''',
+  'рейсы в продаже стоят только на опубликованных маршрутах': '''
+    select count(*) from trips t join routes r on r.id = t.route_id
+    where t.status in ('planned', 'started') and r.status <> 'published' ''',
+  'не начатые рейсы есть только у одобренных и не заблокированных водителей': '''
+    select count(*) from trips t join drivers d on d.user_id = t.driver_id join profiles p on p.id = d.user_id
+    where t.status = 'planned' and (d.status <> 'approved' or p.blocked)''',
+  'у человека не больше пяти действующих карт': '''
+    select count(*) from (select user_id from cards where removed_at is null group by user_id having count(*) > 5) x''',
+  'список мест в брони — простой список без вложений': '''
+    select count(*) from bookings where array_ndims(seat_ids) <> 1''',
+  'в системе есть действующий владелец': '''
+    select case when exists (
+      select 1 from staff s join profiles p on p.id = s.user_id where 'owner' = any (s.roles) and not p.blocked
+    ) then 0 else 1 end''',
   'место рейса есть в машине водителя': '''
     select count(*) from trip_seats s join trips t on t.id = s.trip_id join drivers d on d.user_id = t.driver_id
     where s.seat_id = 'rm' and d.seats_total = 3 and t.status in ('planned', 'started')''',
