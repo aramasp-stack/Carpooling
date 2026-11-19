@@ -13,7 +13,7 @@ extension SearchPanel on HomeState {
         children: [
           if (pick != null) _pickHint(),
           _whereBox(),
-          if (suggestFor != null) _suggestBox(),
+          if (suggestFor == 'to') _suggestBox(),
           if (from == null && suggestFor == null) _recent(),
           const SizedBox(height: 8),
           Wrap(spacing: 8, children: [
@@ -86,10 +86,12 @@ extension SearchPanel on HomeState {
             suggestFor = which;
             // Поле уже заполнено: показываем весь список, а текст выделяем, чтобы ввод его заменил.
             if (value != null) ctl.selection = TextSelection(baseOffset: 0, extentOffset: ctl.text.length);
-            suggestions = localPlaces(value != null ? '' : ctl.text);
+            suggestQuery = value != null ? '' : ctl.text;
+            suggestions = localPlaces(suggestQuery);
           }),
           onChanged: (t) => update(() {
             suggestFor = which;
+            suggestQuery = t;
             suggestions = localPlaces(t);
           }),
         ),
@@ -103,24 +105,37 @@ extension SearchPanel on HomeState {
     ]);
   }
 
-  Widget _whereBox() => Container(
-        padding: const EdgeInsets.fromLTRB(14, 2, 4, 2),
-        decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(16)),
-        child: Row(children: [
-          Expanded(child: Column(children: [_whereRow('from'), const Divider(height: 1), _whereRow('to')])),
-          IconButton(
-            tooltip: 'Поменять местами',
-            icon: const Icon(Icons.swap_vert, color: AppColors.muted),
-            onPressed: () {
-              final f = from, t = to;
-              setPlace('from', t);
-              setPlace('to', f);
-            },
-          ),
-        ]),
-      );
+  Widget _whereBox() {
+    // Список для «Откуда» раскрывается сразу под этим полем, над «Куда».
+    final rows = Column(children: [
+      _whereRow('from'),
+      if (suggestFor == 'from') Padding(padding: const EdgeInsets.fromLTRB(0, 0, 10, 10), child: _suggestBox()),
+      const Divider(height: 1),
+      _whereRow('to'),
+    ]);
+    return Container(
+      padding: const EdgeInsets.fromLTRB(14, 2, 4, 2),
+      decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(16)),
+      child: suggestFor == 'from'
+          ? rows
+          : Row(children: [
+              Expanded(child: rows),
+              IconButton(
+                tooltip: 'Поменять местами',
+                icon: const Icon(Icons.swap_vert, color: AppColors.muted),
+                onPressed: () {
+                  final f = from, t = to;
+                  setPlace('from', t);
+                  setPlace('to', f);
+                },
+              ),
+            ]),
+    );
+  }
 
-  Widget _suggestBox() => Container(
+  Widget _suggestBox() {
+    if (suggestFor == 'to' && from != null) return _destinationsBox();
+    return Container(
         margin: const EdgeInsets.only(top: 6),
         decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
         child: Column(children: [
@@ -151,6 +166,39 @@ extension SearchPanel on HomeState {
             ),
         ]),
       );
+  }
+
+  /// Список под «Куда», когда «Откуда» уже выбрано: только направления, куда отсюда реально можно уехать.
+  Widget _destinationsBox() {
+    final all = routesFromHere;
+    final q = suggestQuery.trim().toLowerCase();
+    final list = q.isEmpty ? all : all.where((m) => m.route.to.name.toLowerCase().contains(q)).toList();
+    return Container(
+      margin: const EdgeInsets.only(top: 6),
+      decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
+      child: Column(children: [
+        if (all.isEmpty)
+          const ListTile(
+            dense: true,
+            leading: Icon(Icons.block, size: 20, color: AppColors.muted),
+            title: Text('Нет маршрутов', style: TextStyle(fontWeight: FontWeight.w600)),
+            subtitle: Text('В пределах 1 км от «откуда» нет мест посадки водителей.'),
+          )
+        else ...[
+          for (final m in list)
+            ListTile(
+              dense: true,
+              leading: Swatch(Color(m.route.color)),
+              title: Text(m.route.to.name),
+              subtitle: Text('из «${m.route.from.name}» · ${_walk(m)}'),
+              onTap: () => pickDestination(m.route),
+            ),
+          if (list.isEmpty)
+            const ListTile(dense: true, title: Text('Нет маршрутов с таким названием', style: TextStyle(color: AppColors.muted))),
+        ],
+      ]),
+    );
+  }
 
   Widget _results() {
     if (from == null) {

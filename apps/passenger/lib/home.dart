@@ -71,6 +71,7 @@ class HomeState extends State<HomeScreen> {
   final fromCtl = TextEditingController();
   final toCtl = TextEditingController();
   String? suggestFor; // 'from' | 'to'
+  String suggestQuery = ''; // что введено в поле, для которого открыт список
   List<Place> suggestions = [];
 
   // Навигация по панели
@@ -146,11 +147,22 @@ class HomeState extends State<HomeScreen> {
   // ---------- поиск ----------
   /// Маршруты, на которые можно сесть отсюда: только те, что начинаются рядом с «откуда».
   /// Маршрут, который здесь лишь проходит, не подходит: по пути водитель никого не подбирает.
-  List<RouteMatch> get matches => from == null
+  List<RouteMatch> get matches => _matchesTo(to?.point);
+
+  /// Все направления из «откуда» — без учёта «куда» (для списка под полем «Куда»).
+  List<RouteMatch> get routesFromHere => _matchesTo(null);
+
+  List<RouteMatch> _matchesTo(GeoPoint? toPoint) => from == null
       ? const []
-      : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: to?.point, nearMeters: Demo.nearMeters)
+      : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: toPoint, nearMeters: Demo.nearMeters)
           .where((m) => meetWalk(m) <= Demo.meetWalkMeters)
           .toList();
+
+  /// Выбрать пункт назначения из списка под полем «Куда».
+  void pickDestination(RouteDef r) {
+    setPlace('to', null);
+    chooseRoute(r.id);
+  }
 
   /// Сколько идти от «откуда» до ближайшего места посадки на маршруте (по рейсам на 3 дня), метры.
   double meetWalk(RouteMatch m) {
