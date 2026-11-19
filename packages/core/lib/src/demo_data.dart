@@ -44,6 +44,16 @@ class Demo {
   static const _cascade = Place('Каскад', GeoPoint(40.1913, 44.5155));
   static const _yerevanMall = Place('Ереван Молл', GeoPoint(40.1595, 44.4880));
   static const _station = Place('Вокзал Сасунци Давид', GeoPoint(40.1563, 44.5163));
+  // Места для тестовых маршрутов (координаты приблизительные).
+  static const _avan = Place('Аван', GeoPoint(40.2160, 44.5650));
+  static const _arabkir = Place('Арабкир', GeoPoint(40.2050, 44.5050));
+  static const _achapnyak = Place('Ачапняк', GeoPoint(40.2050, 44.4600));
+  static const _kanaker = Place('Канакер-Зейтун', GeoPoint(40.2090, 44.5330));
+  static const _norkMarash = Place('Норк-Мараш', GeoPoint(40.1820, 44.5480));
+  static const _bangladesh = Place('Бангладеш', GeoPoint(40.1630, 44.4430));
+  static const _komitas = Place('Комитас', GeoPoint(40.2040, 44.5120));
+  static const _dalma = Place('Далма Гарден Молл', GeoPoint(40.1800, 44.4890));
+  static const _nzhdeh = Place('Метро Гарегин Нжде', GeoPoint(40.1635, 44.4960));
 
   static const routes = <RouteDef>[
     RouteDef(id: 'M1', color: 0xFF4F46E5, price: 500, minutes: 25, from: _davtashen, to: _republic),
@@ -52,6 +62,28 @@ class Demo {
     RouteDef(id: 'M4', color: 0xFF9333EA, price: 400, minutes: 22, from: _erebuni, to: _cascade),
     RouteDef(id: 'M5', color: 0xFFEA580C, price: 500, minutes: 25, from: _davtashen, to: _yerevanMall),
     RouteDef(id: 'M6', color: 0xFF0891B2, price: 400, minutes: 24, from: _norNork, to: _station),
+    // Обратно — к тем же маршрутам.
+    RouteDef(id: 'M7', color: 0xFF2563EB, price: 500, minutes: 25, from: _republic, to: _davtashen),
+    RouteDef(id: 'M8', color: 0xFF16A34A, price: 400, minutes: 22, from: _republic, to: _norNork),
+    RouteDef(id: 'M9', color: 0xFFB91C1C, price: 1200, minutes: 30, from: _republic, to: _airport),
+    RouteDef(id: 'M10', color: 0xFFC026D3, price: 400, minutes: 22, from: _cascade, to: _erebuni),
+    RouteDef(id: 'M11', color: 0xFFD97706, price: 500, minutes: 25, from: _yerevanMall, to: _davtashen),
+    RouteDef(id: 'M12', color: 0xFF0D9488, price: 400, minutes: 24, from: _station, to: _norNork),
+    // Новые направления, туда и обратно.
+    RouteDef(id: 'M13', color: 0xFF7C3AED, price: 400, minutes: 18, from: _achapnyak, to: _republic),
+    RouteDef(id: 'M14', color: 0xFF6D28D9, price: 400, minutes: 18, from: _republic, to: _achapnyak),
+    RouteDef(id: 'M15', color: 0xFF0284C7, price: 500, minutes: 22, from: _avan, to: _republic),
+    RouteDef(id: 'M16', color: 0xFF0369A1, price: 500, minutes: 22, from: _republic, to: _avan),
+    RouteDef(id: 'M17', color: 0xFF65A30D, price: 400, minutes: 20, from: _bangladesh, to: _republic),
+    // Короткие, 2–4 км.
+    RouteDef(id: 'M18', color: 0xFFDB2777, price: 300, minutes: 8, from: _komitas, to: _cascade),
+    RouteDef(id: 'M19', color: 0xFFBE185D, price: 300, minutes: 8, from: _cascade, to: _komitas),
+    RouteDef(id: 'M20', color: 0xFF0E7490, price: 300, minutes: 10, from: _norkMarash, to: _republic),
+    RouteDef(id: 'M21', color: 0xFF4D7C0F, price: 300, minutes: 10, from: _kanaker, to: _cascade),
+    RouteDef(id: 'M22', color: 0xFFE11D48, price: 300, minutes: 10, from: _dalma, to: _republic),
+    RouteDef(id: 'M23', color: 0xFF9A3412, price: 300, minutes: 8, from: _nzhdeh, to: _station),
+    RouteDef(id: 'M24', color: 0xFF1D4ED8, price: 300, minutes: 12, from: _arabkir, to: _republic),
+    RouteDef(id: 'M25', color: 0xFF1E40AF, price: 300, minutes: 12, from: _republic, to: _arabkir),
   ];
 
   /// Места для подсказок при вводе адреса (работают и без поиска Яндекса).
@@ -61,8 +93,15 @@ class Demo {
     Place('Опера', GeoPoint(40.1860, 44.5150)),
     _davtashen,
     _norNork,
-    Place('Аван', GeoPoint(40.2160, 44.5650)),
-    Place('Арабкир', GeoPoint(40.2050, 44.5050)),
+    _avan,
+    _arabkir,
+    _achapnyak,
+    _kanaker,
+    _norkMarash,
+    _bangladesh,
+    _komitas,
+    _dalma,
+    _nzhdeh,
     Place('Метро Барекамутюн', GeoPoint(40.1962, 44.5026)),
     Place('Метро Маршал Баграмян', GeoPoint(40.1916, 44.5105)),
     Place('Метро Еритасардакан', GeoPoint(40.1860, 44.5210)),

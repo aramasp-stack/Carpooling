@@ -106,6 +106,20 @@ void main() {
       );
       expect(m.where((x) => x.route.id == 'M1'), isEmpty);
     });
+
+    test('обратно — обратный маршрут', () {
+      final m = matchRoutes(
+        geometries: geos, routes: Demo.routes,
+        from: const GeoPoint(40.1777, 44.5126), to: const GeoPoint(40.2264, 44.4930),
+      );
+      expect(m.first.route.id, 'M7');
+    });
+
+    test('у маршрутов уникальные номера без дефиса (номер — часть номера рейса)', () {
+      final ids = Demo.routes.map((r) => r.id).toList();
+      expect(ids.toSet().length, ids.length);
+      expect(ids.where((id) => id.contains('-')), isEmpty);
+    });
   });
 
   test('форматирование', () {
