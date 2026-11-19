@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
@@ -123,6 +124,10 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
   ym.MapObjectCollection? _routesLayer;
   ym.MapObjectCollection? _markersLayer;
   ym.PlacemarkMapObject? _carMark;
+
+  // Пульсирующий круг под меткой «я здесь».
+  ym.PlacemarkMapObject? _meHalo;
+  Timer? _pulse;
   late final AppLifecycleListener _lifecycle;
   bool _active = false;
   final Map<String, yi.ImageProvider> _icons = {};
@@ -150,6 +155,7 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
 
   @override
   void dispose() {
+    _pulse?.cancel();
     if (c._state == this) c._state = null;
     if (hasMapkitKey) {
       _window?.map.removeInputListener(this);
@@ -219,12 +225,43 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     final layer = _markersLayer;
     if (layer == null) return;
     layer.clear();
+    _meHalo = null;
     for (final m in c._markers.values) {
+      if (m.kind == MarkerKind.me) {
+        // «Я здесь»: пульсирующий круг и капля, остриём ровно в точке.
+        _meHalo = layer.addPlacemark()
+          ..geometry = _pt(m.point)
+          ..setIcon(_icons.putIfAbsent('me-halo', () => yi.ImageProvider(_drawHalo, id: 'me-halo')))
+          ..setIconStyle(const ym.IconStyle(scale: 0.5, zIndex: 29));
+        layer.addPlacemark()
+          ..geometry = _pt(m.point)
+          ..setIcon(_iconFor(m.kind))
+          ..setIconStyle(const ym.IconStyle(anchor: math.Point(0.5, 1.0), zIndex: 35));
+        continue;
+      }
       layer.addPlacemark()
         ..geometry = _pt(m.point)
         ..setIcon(_iconFor(m.kind))
         ..setIconStyle(const ym.IconStyle(scale: 1, zIndex: 30));
     }
+    _syncPulse();
+  }
+
+  /// Круг расходится от метки и тает — раз в 1,6 секунды, пока метка «я здесь» на карте.
+  void _syncPulse() {
+    if (_meHalo == null) {
+      _pulse?.cancel();
+      _pulse = null;
+      return;
+    }
+    _pulse ??= Timer.periodic(const Duration(milliseconds: 50), (_) {
+      final halo = _meHalo;
+      if (halo == null || !mounted) return;
+      final t = (DateTime.now().millisecondsSinceEpoch % 1600) / 1600;
+      halo
+        ..setIconStyle(ym.IconStyle(scale: 0.35 + 1.0 * t, zIndex: 29))
+        ..opacity = (1 - t) * 0.85;
+    });
   }
 
   void _renderCar() {
@@ -319,16 +356,47 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     return rec.endRecording().toImage(s.ceil(), s.ceil());
   }
 
-  /// «Я здесь»: голубая точка с белым кольцом и полупрозрачным ореолом.
+  static const _meBlue = Color(0xFF1E88E5);
+
+  /// «Я здесь»: капля с белой точкой внутри; острие — там, где пассажир (якорь внизу по центру).
   Future<ui.Image> _drawMe() {
-    final s = 44 * _dpr;
+    final d = _dpr;
+    final w = 38 * d, h = 52 * d;
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec);
+    final r = w / 2 - 3 * d; // радиус «головы» капли
+    final c = Offset(w / 2, r + 3 * d);
+    final tip = Offset(w / 2, h - 1.5 * d);
+    // Капля: круг и два касательных отрезка к острию.
+    final a = math.asin(r / (tip.dy - c.dy));
+    final drop = Path()
+      ..moveTo(tip.dx, tip.dy)
+      ..lineTo(c.dx - r * math.cos(a), c.dy + r * math.sin(a))
+      ..arcTo(Rect.fromCircle(center: c, radius: r), math.pi - a, math.pi + 2 * a, false)
+      ..close();
+    canvas.drawPath(drop.shift(Offset(0, 1.5 * d)), Paint()
+      ..color = Colors.black.withValues(alpha: 0.25)
+      ..maskFilter = MaskFilter.blur(BlurStyle.normal, 2 * d));
+    canvas.drawPath(drop, Paint()..color = _meBlue);
+    canvas.drawPath(drop, Paint()
+      ..color = Colors.white
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2.5 * d);
+    canvas.drawCircle(c, r * 0.42, Paint()..color = Colors.white);
+    return rec.endRecording().toImage(w.ceil(), h.ceil());
+  }
+
+  /// Круг под каплей; его размер и прозрачность меняет таймер — получается пульсация.
+  Future<ui.Image> _drawHalo() {
+    final s = 96 * _dpr;
     final rec = ui.PictureRecorder();
     final canvas = Canvas(rec);
     final center = Offset(s / 2, s / 2);
-    const blue = Color(0xFF0EA5E9);
-    canvas.drawCircle(center, s / 2, Paint()..color = blue.withValues(alpha: 0.22));
-    canvas.drawCircle(center, 10 * _dpr, Paint()..color = Colors.white);
-    canvas.drawCircle(center, 7 * _dpr, Paint()..color = blue);
+    canvas.drawCircle(center, s / 2, Paint()..color = _meBlue.withValues(alpha: 0.30));
+    canvas.drawCircle(center, s / 2 - 1.5 * _dpr, Paint()
+      ..color = _meBlue.withValues(alpha: 0.55)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2 * _dpr);
     return rec.endRecording().toImage(s.ceil(), s.ceil());
   }
 
