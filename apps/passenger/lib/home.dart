@@ -149,15 +149,18 @@ class HomeState extends State<HomeScreen> {
   List<RouteMatch> get matches => from == null
       ? const []
       : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: to?.point, nearMeters: Demo.nearMeters)
-          .where((m) => startWalk(m) <= Demo.nearMeters)
+          .where((m) => meetWalk(m) <= Demo.meetWalkMeters)
           .toList();
 
-  /// Сколько идти от «откуда» до начального района маршрута, метры.
-  double startWalk(RouteMatch m) {
-    final g = m.geometry;
+  /// Сколько идти от «откуда» до ближайшего места посадки на маршруте (по рейсам на 3 дня), метры.
+  double meetWalk(RouteMatch m) {
+    final alongs = {
+      for (var d = 0; d < 3; d++)
+        for (final t in trips.tripsFor(m.route, d)) t.meetAlong,
+    };
     var best = double.infinity;
-    for (var a = 0.0; a <= Demo.startDistrictMeters && a <= g.length; a += 100) {
-      final d = distanceMeters(from!.point, g.pointAt(a));
+    for (final a in alongs) {
+      final d = distanceMeters(from!.point, m.geometry.pointAt(a));
       if (d < best) best = d;
     }
     return best;
@@ -438,7 +441,13 @@ class HomeState extends State<HomeScreen> {
           if (refit) map.fit([from!.point, for (final a in meets) g.pointAt(a), g.pointAt(Demo.startDistrictMeters)]);
         } else {
           map.showRoutes([for (final x in m) MapRoute(x.route, x.geometry)]);
-          if (refit) map.fit([from!.point, if (to != null) to!.point, for (final x in m) ...x.geometry.points]);
+          if (refit) {
+            if (m.isEmpty && to == null) {
+              map.showAround(from!.point); // маршрутов нет — показать саму точку и окрестности
+            } else {
+              map.fit([from!.point, if (to != null) to!.point, for (final x in m) ...x.geometry.points]);
+            }
+          }
         }
       case CarPane(:final match, :final trip):
         final g = match.geometry;

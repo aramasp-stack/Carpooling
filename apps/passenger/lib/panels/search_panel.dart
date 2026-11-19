@@ -181,7 +181,7 @@ extension SearchPanel on HomeState {
       return Padding(
         padding: const EdgeInsets.all(18),
         child: Text(
-          'Отсюда${to != null ? ' в нужную сторону' : ''} маршруты не начинаются. Сесть можно только в начале маршрута, в месте посадки водителя: выберите точку ближе к нему.',
+          'Маршрутов нет${to != null ? ' в нужную сторону' : ''}: в пределах 1 км отсюда нет мест посадки водителей. Выберите другую точку.',
           textAlign: TextAlign.center,
           style: const TextStyle(color: AppColors.muted),
         ),
@@ -201,8 +201,8 @@ extension SearchPanel on HomeState {
   String meetText(double walk) => walk < 120 ? 'место посадки рядом с вами' : 'до места посадки ${meters(walk)} пешком';
 
   String _walk(RouteMatch m) {
-    final d = startWalk(m);
-    return d < 120 ? 'начинается рядом' : 'до начала маршрута ${meters(d)} пешком';
+    final d = meetWalk(m);
+    return d < 120 ? 'место посадки рядом' : 'до места посадки ${meters(d)} пешком';
   }
 
   Widget _routeCard(RouteMatch m) {
@@ -244,7 +244,7 @@ extension SearchPanel on HomeState {
           ]),
           const SizedBox(height: 2),
           Text(
-            '${startWalk(m) < 120 ? 'маршрут ' : ''}${_walk(m)} · высадка в конечной точке',
+            '${_walk(m)} · высадка в конечной точке',
             style: const TextStyle(fontSize: 13, color: AppColors.muted),
           ),
           const SizedBox(height: 6),

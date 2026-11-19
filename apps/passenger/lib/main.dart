@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:transport_core/transport_core.dart';
 import 'package:transport_ui/transport_ui.dart';
 
@@ -8,6 +9,8 @@ import 'home.dart';
 /// Запуск с картой: flutter run --dart-define=MAPKIT_API_KEY=ваш-ключ
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Экран не поворачивается: приложение всегда вертикальное.
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   await setupMapkit();
   final store = await PrefsStore.open();
   runApp(PassengerApp(data: DataStore(store)));
