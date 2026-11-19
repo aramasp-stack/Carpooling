@@ -1,0 +1,15 @@
+name: server_tests
+description: Проверки сервера TransportApp на локальной копии базы — виртуальные пассажиры, водители и сотрудники.
+version: 0.1.0
+publish_to: none
+
+environment:
+  sdk: ^3.5.0
+
+dependencies:
+  postgres: ^3.5.0
+  transport_core:
+    path: ../../packages/core
+
+dev_dependencies:
+  test: ^1.25.0
