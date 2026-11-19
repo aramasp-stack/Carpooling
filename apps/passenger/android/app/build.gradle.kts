@@ -29,6 +29,14 @@ android {
         versionName = flutter.versionName
     }
 
+    // Библиотеки (в основном Яндекс MapKit) сжаты внутри файла установки: так он вдвое меньше
+    // и его можно отправить на телефон (лимит 30 МБ).
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.
