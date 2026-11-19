@@ -30,6 +30,9 @@ class Demo {
 
   static const yerevanCenter = GeoPoint(40.1830, 44.5100);
 
+  /// Куда смотрит карта при открытии, если местоположение пассажира неизвестно.
+  static const republicSquare = _republic;
+
   static const _davtashen = Place('Давташен', GeoPoint(40.2264, 44.4930));
   static const _republic = Place('Площадь Республики', GeoPoint(40.1777, 44.5126));
   static const _norNork = Place('Нор Норк', GeoPoint(40.1990, 44.5600));

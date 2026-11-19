@@ -57,6 +57,9 @@ class HomeState extends State<HomeScreen> {
   Map<String, RouteGeometry> geoms = {};
   bool loading = true;
 
+  /// Где сейчас пассажир (если телефон разрешил определить и он в Ереване).
+  GeoPoint? myPos;
+
   // Поиск
   Place? from;
   Place? to;
@@ -84,6 +87,9 @@ class HomeState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
+    // Карта открывается там, где пассажир; если это неизвестно — на площади Республики.
+    map.showAround(Demo.republicSquare.point);
+    _locateOnStart();
     loader.loadAll(Demo.routes).then((g) {
       if (!mounted) return;
       setState(() {
@@ -305,23 +311,54 @@ class HomeState extends State<HomeScreen> {
     chooseRoute(r.id);
   }
 
-  Future<void> locateMe() async {
+  /// Местоположение телефона; null — нет разрешения или не удалось определить.
+  Future<GeoPoint?> _position() async {
     try {
+      if (!await Geolocator.isLocationServiceEnabled()) return null;
       var perm = await Geolocator.checkPermission();
       if (perm == LocationPermission.denied) perm = await Geolocator.requestPermission();
-      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) {
-        if (mounted) toast(context, 'Нет доступа к местоположению. Выберите точку на карте.');
-        return;
-      }
-      final pos = await Geolocator.getCurrentPosition();
-      final p = GeoPoint(pos.latitude, pos.longitude);
-      if (distanceMeters(p, Demo.yerevanCenter) > 40000 && mounted) {
-        toast(context, 'Вы далеко от Еревана — маршрутов рядом не будет. Выберите точку на карте.');
-      }
-      setPlace('from', Place('Моё местоположение', p));
+      if (perm == LocationPermission.denied || perm == LocationPermission.deniedForever) return null;
+      final pos = await Geolocator.getCurrentPosition().timeout(const Duration(seconds: 12));
+      return GeoPoint(pos.latitude, pos.longitude);
     } catch (_) {
-      if (mounted) toast(context, 'Не удалось определить местоположение. Выберите точку на карте.');
+      return null;
     }
+  }
+
+  static bool _inYerevan(GeoPoint p) => distanceMeters(p, Demo.yerevanCenter) <= 40000;
+
+  /// При открытии: карта по центру на пассажире и метка «я здесь».
+  Future<void> _locateOnStart() async {
+    final p = await _position();
+    if (p == null || !_inYerevan(p) || !mounted) return;
+    update(() => myPos = p);
+    if (from == null && pane is SearchPane) map.showAround(p);
+    syncMap();
+  }
+
+  /// «Поехать отсюда»: «откуда» — там, где сейчас пассажир.
+  Future<void> locateMe() async {
+    // Местоположение уже известно с открытия приложения — сразу, без ожидания.
+    final known = myPos;
+    if (known != null) {
+      if (pane is! SearchPane) goTab(HomeTab.search);
+      setPlace('from', Place('Моё местоположение', known));
+      return;
+    }
+    toast(context, 'Определяем местоположение…');
+    final p = await _position();
+    if (!mounted) return;
+    if (p == null) {
+      toast(context, 'Местоположение недоступно: включите геоданные или выберите точку на карте.');
+      return;
+    }
+    if (!_inYerevan(p)) {
+      toast(context, 'Вы далеко от Еревана — маршрутов рядом не будет. Выберите точку на карте.');
+      return;
+    }
+    update(() => myPos = p);
+    if (pane is! SearchPane) goTab(HomeTab.search);
+    setPlace('from', Place('Моё местоположение', p));
   }
 
   List<({Trip trip, DateTime at})> driversFor(RouteMatch m) {
@@ -341,6 +378,7 @@ class HomeState extends State<HomeScreen> {
   // ---------- карта ----------
   void syncMap() {
     map.clearAll();
+    if (myPos != null) map.setMarker('me', myPos, MarkerKind.me);
     final p = pane;
     switch (p) {
       case SearchPane():
@@ -453,7 +491,22 @@ class HomeState extends State<HomeScreen> {
         if (!didPop) pop();
       },
       child: MapSheetScaffold(
-        map: TransportMap(controller: map, onTap: onMapTap, bottomCover: MapSheetScaffold.initialSize),
+        map: Stack(children: [
+          Positioned.fill(child: TransportMap(controller: map, onTap: onMapTap, bottomCover: MapSheetScaffold.initialSize)),
+          // «Поехать отсюда»: одно нажатие — и «откуда» там, где пассажир.
+          Positioned(
+            top: MediaQuery.paddingOf(context).top + 52,
+            right: 14,
+            child: FloatingActionButton.small(
+              heroTag: 'me',
+              tooltip: 'Поехать отсюда',
+              backgroundColor: Colors.white,
+              foregroundColor: _accent,
+              onPressed: locateMe,
+              child: const Icon(Icons.my_location),
+            ),
+          ),
+        ]),
         sheetController: sheet,
         panel: _panel(),
         bottomBar: NavigationBar(

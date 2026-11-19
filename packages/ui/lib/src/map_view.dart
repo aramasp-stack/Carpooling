@@ -20,7 +20,7 @@ class MapRoute {
 }
 
 /// Виды меток.
-enum MarkerKind { from, to, pickup, start, finish, passenger }
+enum MarkerKind { from, to, pickup, start, finish, passenger, me }
 
 class _Marker {
   const _Marker(this.point, this.kind, this.hint);
@@ -76,6 +76,20 @@ class TransportMapController {
 
   /// Показать все точки, с учётом нижней панели, которая закрывает часть карты.
   void fit(List<GeoPoint> points) => _state?._fit(points);
+
+  List<GeoPoint>? _startView;
+
+  /// Показать окрестности точки (примерно [meters] в каждую сторону) в видимой части карты.
+  /// Если карта ещё не создана, она откроется сразу на этом месте.
+  void showAround(GeoPoint p, {double meters = 700}) {
+    final dLat = meters / 111000, dLon = meters / (111000 * math.cos(p.lat * math.pi / 180));
+    final box = [GeoPoint(p.lat - dLat, p.lon - dLon), GeoPoint(p.lat + dLat, p.lon + dLon)];
+    if (_state?._window != null) {
+      _state!._fit(box);
+    } else {
+      _startView = box;
+    }
+  }
 
   void clearAll() {
     _routes = const [];
@@ -175,8 +189,8 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     _renderRoutes();
     _renderMarkers();
     _renderCar();
-    // Ереван целиком в видимой части карты (над нижней панелью).
-    _fit(const [GeoPoint(40.12, 44.43), GeoPoint(40.23, 44.60)]);
+    // Место, заданное заранее (например, где находится пассажир), иначе Ереван целиком над нижней панелью.
+    _fit(c._startView ?? const [GeoPoint(40.12, 44.43), GeoPoint(40.23, 44.60)]);
   }
 
   // ---------- отрисовка ----------
@@ -268,6 +282,9 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
 
   // ---------- значки ----------
   yi.ImageProvider _iconFor(MarkerKind kind) {
+    if (kind == MarkerKind.me) {
+      return _icons.putIfAbsent('me', () => yi.ImageProvider(_drawMe, id: 'me'));
+    }
     final (fill, ring) = switch (kind) {
       MarkerKind.from => (AppColors.from, Colors.white),
       MarkerKind.to => (AppColors.to, Colors.white),
@@ -275,6 +292,7 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
       MarkerKind.start => (AppColors.from, Colors.white),
       MarkerKind.finish => (AppColors.to, Colors.white),
       MarkerKind.passenger => (const Color(0xFF2563EB), Colors.white),
+      MarkerKind.me => (const Color(0xFF0EA5E9), Colors.white),
     };
     return _icons.putIfAbsent('dot-${kind.name}', () => yi.ImageProvider(() => _drawDot(fill, ring), id: 'dot-${kind.name}'));
   }
@@ -292,6 +310,19 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     canvas.drawCircle(center, s / 2 - 1, Paint()..color = Colors.black.withValues(alpha: 0.18));
     canvas.drawCircle(center, s / 2 - 3 * _dpr, Paint()..color = ring);
     canvas.drawCircle(center, s / 2 - 7 * _dpr, Paint()..color = fill);
+    return rec.endRecording().toImage(s.ceil(), s.ceil());
+  }
+
+  /// «Я здесь»: голубая точка с белым кольцом и полупрозрачным ореолом.
+  Future<ui.Image> _drawMe() {
+    final s = 44 * _dpr;
+    final rec = ui.PictureRecorder();
+    final canvas = Canvas(rec);
+    final center = Offset(s / 2, s / 2);
+    const blue = Color(0xFF0EA5E9);
+    canvas.drawCircle(center, s / 2, Paint()..color = blue.withValues(alpha: 0.22));
+    canvas.drawCircle(center, 10 * _dpr, Paint()..color = Colors.white);
+    canvas.drawCircle(center, 7 * _dpr, Paint()..color = blue);
     return rec.endRecording().toImage(s.ceil(), s.ceil());
   }
 
