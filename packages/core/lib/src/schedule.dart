@@ -17,17 +17,18 @@ int djb2(String s) {
   return h;
 }
 
-/// Места в салоне: переднее, сзади слева, (посередине), справа. Цены — от базовой цены маршрута.
-List<Seat> seatsFor(RouteDef route, int total) {
-  final base = route.price;
-  final seats = [
-    Seat(id: 'front', label: 'Переднее', price: base + Demo.seatFrontExtra),
-    Seat(id: 'rl', label: 'Сзади слева', price: base + Demo.seatWindowExtra),
-    Seat(id: 'rm', label: 'Сзади посередине', price: base + Demo.seatMiddleExtra),
-    Seat(id: 'rr', label: 'Сзади справа', price: base + Demo.seatWindowExtra),
-  ];
-  return total == 3 ? seats.where((s) => s.id != 'rm').toList() : seats;
-}
+/// Пассажирские места легковой машины: переднее и два сзади (сзади — не больше двух пассажиров).
+const carSeatIds = ['front', 'rl', 'rr'];
+
+/// Название места.
+String seatLabel(String id) => switch (id) { 'front' => 'Переднее', 'rl' => 'Сзади слева', 'rr' => 'Сзади справа', _ => id };
+
+/// Места в салоне [ids] (по умолчанию все три) по порядку, с ценами от базовой цены маршрута.
+List<Seat> seatsFor(RouteDef route, [Iterable<String> ids = carSeatIds]) => [
+      for (final id in carSeatIds)
+        if (ids.contains(id))
+          Seat(id: id, label: seatLabel(id), price: route.price + (id == 'front' ? Demo.seatFrontExtra : Demo.seatWindowExtra)),
+    ];
 
 class TripService {
   TripService(this.data, {DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
@@ -62,8 +63,9 @@ class TripService {
       final dep = DateTime(day.year, day.month, day.day, int.parse(parts[0]), int.parse(parts[1]));
       final id = '${route.id}-${ymd(dep)}-$t';
       final seed = djb2(id);
-      final total = 3 + (seed >> 4) % 2;
-      final seats = seatsFor(route, total);
+      // Часть демо-водителей продаёт только задние места.
+      final seats = seatsFor(route, (seed >> 4) % 3 == 0 ? const ['rl', 'rr'] : carSeatIds);
+      final total = seats.length;
       final takenDemo = (seed >> 7) % total;
       final order = seats.map((s) => s.id).toList()..sort((a, b) => djb2(id + a).compareTo(djb2(id + b)));
       list.add(_finish(
@@ -91,6 +93,7 @@ class TripService {
           driver: Demo.drivers[c.driverIndex],
           seats: c.seats.map((s) => s.copy()).toList(),
           meetAlong: c.meetAlong,
+          dropAlong: c.dropAlong,
           custom: true,
         ),
         const {},

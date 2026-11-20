@@ -20,7 +20,7 @@ class _CarPanelState extends State<CarPanel> {
   @override
   Widget build(BuildContext context) {
     final h = widget.home, m = widget.match, t = widget.trip;
-    final dropAt = h.trips.timeAt(t, m.geometry.length, m.geometry);
+    final dropAt = h.trips.timeAt(t, t.dropOn(m.geometry.length), m.geometry);
     final walk = h.walkTo(t, m.geometry);
     final order = ['front', 'rl', 'rm', 'rr'].where(selected.contains).map((id) => _seat(id).label).join(', ');
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
@@ -39,7 +39,7 @@ class _CarPanelState extends State<CarPanel> {
         color: _accent,
         onToggle: (id) => setState(() => selected.contains(id) ? selected.remove(id) : selected.add(id)),
       ),
-      const NoteBox('Водитель ждёт в месте посадки и отправляется по расписанию — подойдите заранее. По пути водитель не останавливается: высадка в конечной точке маршрута.'),
+      const NoteBox('Водитель ждёт в месте посадки и отправляется по расписанию — подойдите заранее. По пути водитель не останавливается: высадка в конце маршрута, в месте, которое указал водитель.'),
       PayBar(
         caption: selected.isEmpty ? 'Места не выбраны' : order,
         total: amd(total),
@@ -78,7 +78,7 @@ class _CarPanelState extends State<CarPanel> {
       tripId: t.id,
       routeId: m.route.id,
       pickAlong: t.meetAlong,
-      dropAlong: m.geometry.length,
+      dropAlong: t.dropOn(m.geometry.length),
       fromName: '${m.route.from.name}, место посадки',
       toName: m.route.to.name,
       seatIds: ids,

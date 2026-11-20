@@ -81,22 +81,29 @@ extension Onboarding on DriverHomeState {
         Expanded(child: TextField(controller: plateCtl, enabled: !locked, decoration: const InputDecoration(labelText: 'Номер', isDense: true))),
       ]),
       const SizedBox(height: 8),
-      Row(children: [
-        const Text('Мест для пассажиров:'),
-        const SizedBox(width: 10),
-        for (final n in [3, 4])
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: ChoiceChip(
-              label: Text('$n'),
-              selected: a.seats == n,
-              onSelected: locked
-                  ? null
-                  : (_) async {
-                      await me.saveApplication(_formApplication()..seats = n);
-                      update(() {});
-                    },
-            ),
+      Text('Места для пассажиров: ${a.seats}', style: const TextStyle(fontWeight: FontWeight.w600)),
+      const SizedBox(height: 2),
+      const Text('Отметьте места, которые вообще готовы продавать. Сзади в легковой машине — не больше двух пассажиров. '
+          'В каждом рейсе выставите все эти места или часть из них.',
+          style: TextStyle(fontSize: 12, color: AppColors.muted)),
+      const SizedBox(height: 6),
+      Wrap(spacing: 8, runSpacing: 4, children: [
+        for (final id in carSeatIds)
+          FilterChip(
+            label: Text(seatLabel(id)),
+            selected: a.seatIds.contains(id),
+            onSelected: locked
+                ? null
+                : (on) async {
+                    final f = _formApplication();
+                    if (on) {
+                      f.seatIds.add(id);
+                    } else {
+                      f.seatIds.remove(id);
+                    }
+                    await me.saveApplication(f);
+                    update(() {});
+                  },
           ),
       ]),
       const SizedBox(height: 8),

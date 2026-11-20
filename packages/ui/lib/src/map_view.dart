@@ -53,6 +53,16 @@ class TransportMapController {
     _state?._renderRoutes();
   }
 
+  List<GeoPoint>? _segment2;
+  Color _segment2Color = AppColors.text;
+
+  /// Второй выделенный отрезок (например, конечный район маршрута рядом с начальным).
+  void setSecondSegment(List<GeoPoint>? points, {Color color = AppColors.text}) {
+    _segment2 = points;
+    _segment2Color = color;
+    _state?._renderRoutes();
+  }
+
   void setMarker(String key, GeoPoint? point, MarkerKind kind, {String? hint}) {
     if (point == null) {
       _markers.remove(key);
@@ -95,6 +105,7 @@ class TransportMapController {
   void clearAll() {
     _routes = const [];
     _segment = null;
+    _segment2 = null;
     _markers.clear();
     _car = null;
     _state?._renderRoutes();
@@ -212,10 +223,10 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
         ..style = const ym.LineStyle(strokeWidth: 5, outlineColor: Colors.white, outlineWidth: 1.5)
         ..zIndex = r.dimmed ? 5 : 10;
     }
-    final seg = c._segment;
-    if (seg != null && seg.length >= 2) {
+    for (final (seg, color) in [(c._segment, c._segmentColor), (c._segment2, c._segment2Color)]) {
+      if (seg == null || seg.length < 2) continue;
       layer.addPolylineWithGeometry(ym.Polyline(seg.map(_pt).toList()))
-        ..setStrokeColor(c._segmentColor)
+        ..setStrokeColor(color)
         ..style = const ym.LineStyle(strokeWidth: 7, outlineColor: Colors.white, outlineWidth: 2)
         ..zIndex = 20;
     }

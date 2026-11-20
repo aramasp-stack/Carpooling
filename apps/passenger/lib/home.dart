@@ -475,7 +475,7 @@ class HomeState extends State<HomeScreen> {
         final g = match.geometry;
         final meet = meetPoint(trip, g);
         map.showRoutes([MapRoute(match.route, g)]);
-        map.setSegment(g.subLine(trip.meetAlong, g.length), color: Color(match.route.color));
+        map.setSegment(g.subLine(trip.meetAlong, trip.dropOn(g.length)), color: Color(match.route.color));
         map.setMarker('pickup', meet, MarkerKind.pickup);
         if (from != null) map.setMarker('from', from!.point, MarkerKind.from);
         // Камера — на место посадки и путь до него: это главное при выборе водителя.

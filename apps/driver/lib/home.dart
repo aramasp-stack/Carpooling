@@ -283,8 +283,9 @@ class DriverHomeState extends State<DriverHome> {
         if (t == null) return;
         final g = geoOf(t.route);
         map.showRoutes([MapRoute(t.route, g)]);
+        map.setSegment(g.subLine(t.meetAlong, t.dropOn(g.length)), color: Color(t.route.color));
         map.setMarker('meet', g.pointAt(t.meetAlong), MarkerKind.start, hint: 'Место посадки');
-        map.setMarker('finish', t.route.to.point, MarkerKind.finish);
+        map.setMarker('finish', g.pointAt(t.dropOn(g.length)), MarkerKind.finish, hint: 'Место высадки');
         map.fit(g.points);
       case RoutePickPane():
         final list = routesFor(from?.point, to?.point).map((x) => x.route).toList();
@@ -309,8 +310,37 @@ class DriverHomeState extends State<DriverHome> {
       setPlace(pickFor!, Place('Точка на карте', p));
       return;
     }
+    if (pane is RoutePickPane) {
+      if (suggestFor != null) {
+        update(() => suggestFor = null);
+        FocusManager.instance.primaryFocus?.unfocus();
+        return;
+      }
+      _tapRoute(p);
+      return;
+    }
     onMapTapHandler?.call(p);
   }
+
+  /// Касание линии маршрута на карте выбирает этот маршрут: дальше — запись на рейс.
+  void _tapRoute(GeoPoint p) {
+    RouteDef? best;
+    var bestDist = _routeTapMeters;
+    for (final x in routesFor(from?.point, to?.point)) {
+      final d = geoOf(x.route).nearest(p).distance;
+      if (d < bestDist) {
+        best = x.route;
+        bestDist = d;
+      }
+    }
+    if (best == null) {
+      toast(context, 'Нажмите на линию маршрута — откроется запись на рейс.');
+      return;
+    }
+    push(NewTripPane(best));
+  }
+
+  static const _routeTapMeters = 400.0;
 
   Future<GeoPoint?> position() async {
     try {
@@ -329,6 +359,7 @@ class DriverHomeState extends State<DriverHome> {
   Future<void> startDrive(Trip t) async {
     if (statusOf(t) == TripStatus.planned) await data.setTripStatus(t.id, TripStatus.started);
     final g = geoOf(t.route);
+    final end = t.dropOn(g.length);
     push(DrivePane(t.id));
     simPos = 0;
     simFactor = 10;
@@ -339,15 +370,15 @@ class DriverHomeState extends State<DriverHome> {
       final dt = (now.difference(last).inMilliseconds / 1000).clamp(0, 0.25);
       last = now;
       final prev = simPos;
-      simPos = (simPos + g.speed * dt * simFactor).clamp(0, g.length);
+      simPos = (simPos + g.speed * dt * simFactor).clamp(0, end);
       map.setCar(g.pointAt(simPos), color: Color(t.route.color), direction: bearingDeg(g.pointAt(prev), g.pointAt(simPos + 15)));
       if (!atMeet && simPos >= t.meetAlong - 20) {
         atMeet = true;
         if (mounted) toast(context, 'Вы на месте посадки: здесь вас ждут пассажиры.');
       }
-      if (simPos >= g.length) {
+      if (simPos >= end) {
         stopSim();
-        if (mounted) toast(context, 'Вы в конечной точке. Завершите рейс.');
+        if (mounted) toast(context, 'Вы на месте высадки. Завершите рейс.');
       }
       update(() {});
     });

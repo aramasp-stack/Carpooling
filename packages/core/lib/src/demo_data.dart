@@ -29,10 +29,12 @@ class Demo {
   /// Начальный район маршрута: первые метры линии, где водитель может выбрать место посадки.
   static const startDistrictMeters = 1500.0;
 
-  /// Надбавки к базовой цене места: переднее дороже, заднее посередине дешевле.
+  /// Конечный район маршрута: последние метры линии, где водитель может выбрать место высадки.
+  static const endDistrictMeters = 1500.0;
+
+  /// Надбавки к базовой цене места: переднее дороже. Сзади в легковой машине — не больше двух пассажиров.
   static const seatFrontExtra = 100;
   static const seatWindowExtra = 0;
-  static const seatMiddleExtra = -100;
 
   static const yerevanCenter = GeoPoint(40.1830, 44.5100);
 

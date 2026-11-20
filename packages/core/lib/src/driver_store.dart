@@ -5,6 +5,7 @@ library;
 
 import 'dart:convert';
 
+import 'schedule.dart';
 import 'store.dart';
 
 /// Отказ: код как у сервера (BAD_CARD_NUMBER, DOCUMENTS_MISSING, …).
@@ -32,17 +33,22 @@ class DriverApplication {
     this.car = '',
     this.carColor = '',
     this.plate = '',
-    this.seats = 4,
+    Set<String>? seatIds,
     this.taxId = '',
     Set<String>? docs,
     this.rejectReason,
-  }) : docs = docs ?? {};
+  })  : seatIds = seatIds ?? carSeatIds.toSet(),
+        docs = docs ?? {};
 
   ApplicationStatus status;
   String car;
   String carColor;
   String plate;
-  int seats;
+
+  /// Пассажирские места машины, которые водитель вообще продаёт: front, rl, rr.
+  /// В каждом рейсе он выставляет все или часть из них.
+  Set<String> seatIds;
+  int get seats => seatIds.length;
   String taxId;
   final Set<String> docs;
   String? rejectReason;
@@ -55,7 +61,7 @@ class DriverApplication {
         'car': car,
         'carColor': carColor,
         'plate': plate,
-        'seats': seats,
+        'seatIds': [for (final id in carSeatIds) if (seatIds.contains(id)) id],
         'taxId': taxId,
         'docs': docs.toList(),
         'rejectReason': rejectReason,
@@ -66,7 +72,8 @@ class DriverApplication {
         car: j['car'] as String? ?? '',
         carColor: j['carColor'] as String? ?? '',
         plate: j['plate'] as String? ?? '',
-        seats: (j['seats'] as num?)?.toInt() ?? 4,
+        // Старые анкеты хранили только число мест (3 или 4) — это все три места легковой машины.
+        seatIds: (j['seatIds'] as List?)?.cast<String>().where(carSeatIds.contains).toSet(),
         taxId: j['taxId'] as String? ?? '',
         docs: ((j['docs'] as List?) ?? const []).cast<String>().toSet(),
         rejectReason: j['rejectReason'] as String?,
@@ -167,7 +174,7 @@ class DriverStore {
   Future<void> submit() async {
     final a = application;
     if (!a.carFilled) throw const DriverError('BAD_ARGUMENT');
-    if (a.seats != 3 && a.seats != 4) throw const DriverError('BAD_SEATS_TOTAL');
+    if (a.seatIds.isEmpty || !a.seatIds.every(carSeatIds.contains)) throw const DriverError('BAD_SEATS_TOTAL');
     if (!a.docsComplete) throw const DriverError('DOCUMENTS_MISSING');
     a
       ..status = ApplicationStatus.pending
@@ -296,7 +303,7 @@ String driverErrorText(String code) => switch (code) {
       'BAD_PHONE' => 'Проверьте номер телефона.',
       'BAD_CODE' => 'Код из SMS — 4 цифры.',
       'BAD_ARGUMENT' => 'Заполните все поля.',
-      'BAD_SEATS_TOTAL' => 'Мест в машине — 3 или 4.',
+      'BAD_SEATS_TOTAL' => 'Отметьте хотя бы одно место для пассажиров.',
       'DOCUMENTS_MISSING' => 'Загрузите все пять документов.',
       'DRIVER_ALREADY_APPROVED' => 'Анкета уже одобрена: документы меняются через новую анкету.',
       'BAD_CARD_NUMBER' => 'Номер карты — 16 цифр.',

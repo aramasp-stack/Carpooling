@@ -22,7 +22,14 @@ extension ProfileScreen on DriverHomeState {
           title: Text(e.value),
           trailing: const Text('проверено', style: TextStyle(fontSize: 12, color: AppColors.muted)),
         ),
-      const Text('Сменить машину можно через новую анкету: её снова проверят.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+      ListTile(
+        dense: true,
+        contentPadding: EdgeInsets.zero,
+        leading: const Icon(Icons.event_seat_outlined),
+        title: Text('Места для пассажиров: ${a.seats}'),
+        subtitle: Text([for (final id in carSeatIds) if (a.seatIds.contains(id)) seatLabel(id)].join(', ')),
+      ),
+      const Text('Сменить машину или места можно через новую анкету: её снова проверят.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
       const SectionTitle('Карта для выплат'),
       ListTile(
         contentPadding: EdgeInsets.zero,

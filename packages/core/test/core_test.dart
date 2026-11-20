@@ -51,7 +51,7 @@ void main() {
       final route = Demo.routeById('M1')!;
       await data.addCustomTrip(CustomTrip(
         id: 'M1-2026-11-10-10:15-c1', routeId: 'M1', date: '2026-11-10', time: '10:15', driverIndex: 0,
-        seats: seatsFor(route, 4),
+        seats: seatsFor(route),
       ));
       final t = s.tripsFor(route, 1).firstWhere((t) => t.custom);
       expect(hhmm(t.departure), '10:15');
@@ -63,18 +63,33 @@ void main() {
       expect(s.tripById(t.id), isNull);
     });
 
-    test('место посадки: у демо-рейсов в начальном районе, у рейса водителя — сохраняется', () async {
+    test('место посадки и высадки: у демо-рейсов — начальный район и конец маршрута, у рейса водителя — сохраняются', () async {
       final data = DataStore(MemoryStore());
       final s = TripService(data, clock: () => DateTime(2026, 11, 9, 12));
       final route = Demo.routeById('M1')!;
       for (final t in s.tripsFor(route, 1)) {
         expect(Demo.meetSpots, contains(t.meetAlong));
+        expect(t.dropOn(9000), 9000);
       }
       await data.addCustomTrip(CustomTrip(
         id: 'M1-2026-11-10-10:15-c1', routeId: 'M1', date: '2026-11-10', time: '10:15', driverIndex: 0,
-        seats: seatsFor(route, 4), meetAlong: 650,
+        seats: seatsFor(route, const ['rl', 'rr']), meetAlong: 650, dropAlong: 8200,
       ));
-      expect(s.tripsFor(route, 1).firstWhere((t) => t.custom).meetAlong, 650);
+      final t = s.tripsFor(route, 1).firstWhere((t) => t.custom);
+      expect(t.meetAlong, 650);
+      expect(t.dropOn(9000), 8200);
+      expect(t.seats.map((x) => x.id), ['rl', 'rr']);
+    });
+
+    test('в легковой машине сзади не больше двух мест: у всех рейсов нет среднего места', () {
+      final s = TripService(DataStore(MemoryStore()), clock: () => DateTime(2026, 11, 9, 12));
+      for (final r in Demo.routes) {
+        for (final t in s.tripsFor(r, 1)) {
+          expect(t.seats.map((x) => x.id).every(carSeatIds.contains), isTrue);
+          expect(t.seats.where((x) => x.id != 'front').length, lessThanOrEqualTo(2));
+        }
+      }
+      expect(seatsFor(Demo.routes.first).map((x) => x.label), ['Переднее', 'Сзади слева', 'Сзади справа']);
     });
 
     test('время в пути считается от места посадки', () {

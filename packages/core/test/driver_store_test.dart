@@ -29,7 +29,12 @@ void main() {
 
   test('анкета: без машины и всех документов не отправить; одобрить можно только отправленную', () async {
     expect(await code(s.submit), 'BAD_ARGUMENT');
-    await s.saveApplication(DriverApplication(car: 'Kia Rio', carColor: 'серая', plate: '11 AA 111', taxId: '0123', seats: 4));
+    await s.saveApplication(DriverApplication(car: 'Kia Rio', carColor: 'серая', plate: '11 AA 111', taxId: '0123', seatIds: {}));
+    expect(await code(s.submit), 'BAD_SEATS_TOTAL', reason: 'без единого места для пассажиров анкету не отправить');
+    await s.saveApplication(s.application..seatIds = {'rl', 'rr'});
+    expect(s.application.seatIds, {'rl', 'rr'});
+    expect(s.application.seats, 2);
+    expect(DriverApplication.fromJson({'seats': 4}).seatIds, carSeatIds.toSet(), reason: 'старая анкета «4 места» — три места седана');
     expect(await code(s.submit), 'DOCUMENTS_MISSING');
     for (final k in driverDocuments.keys.take(4)) {
       await s.setDocument(k);

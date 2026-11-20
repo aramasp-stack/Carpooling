@@ -28,6 +28,11 @@ extension TripScreen on DriverHomeState {
         const SizedBox(width: 4),
         Expanded(child: Text('Посадка ${meetText(t)}', style: const TextStyle(fontSize: 13))),
       ]),
+      Row(children: [
+        const Icon(Icons.flag, size: 16, color: AppColors.to),
+        const SizedBox(width: 4),
+        Expanded(child: Text('Высадка ${dropText(t)}', style: const TextStyle(fontSize: 13))),
+      ]),
       SectionTitle('Пассажиры · ${taken.length} из ${t.seats.length}'),
       if (taken.isEmpty) const Text('Пока никто не купил место.', style: TextStyle(color: AppColors.muted)),
       // Пока приложения не связаны через сервер, покупки пассажиров в модели изображает эта кнопка.
@@ -142,9 +147,10 @@ extension TripScreen on DriverHomeState {
   Widget _navButton(Trip t) {
     final g = geoOf(t.route);
     final meet = g.pointAt(t.meetAlong);
+    final drop = g.pointAt(t.dropOn(g.length));
     return OutlinedButton.icon(
       onPressed: () => launchUrl(
-        Uri.parse('https://yandex.ru/maps/?rtext=${meet.lat},${meet.lon}~${t.route.to.point.lat},${t.route.to.point.lon}&rtt=auto'),
+        Uri.parse('https://yandex.ru/maps/?rtext=${meet.lat},${meet.lon}~${drop.lat},${drop.lon}&rtt=auto'),
         mode: LaunchMode.externalApplication,
       ),
       icon: const Icon(Icons.navigation_outlined),
@@ -328,18 +334,19 @@ extension TripScreen on DriverHomeState {
     if (t == null) return const SizedBox.shrink();
     final g = geoOf(t.route);
     final toMeet = t.meetAlong - simPos;
-    final eta = toMeet > 20 ? 'До места посадки ${minutesText(toMeet / g.speed)}' : 'До финиша ${minutesText((g.length - simPos) / g.speed)}';
+    final end = t.dropOn(g.length);
+    final eta = toMeet > 20 ? 'До места посадки ${minutesText(toMeet / g.speed)}' : 'До места высадки ${minutesText((end - simPos) / g.speed)}';
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       BackLink('К рейсу', onTap: pop),
       Text(t.route.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
       const Text('Симуляция: машина едет по маршруту без настоящего GPS.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
       const SizedBox(height: 10),
       Text(eta, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-      Text(toMeet > 20 ? 'Посадка ${meetText(t)}' : 'Высадка всех пассажиров: «${t.route.to.name}»', style: const TextStyle(color: AppColors.muted)),
+      Text(toMeet > 20 ? 'Посадка ${meetText(t)}' : 'Высадка всех пассажиров ${dropText(t)}', style: const TextStyle(color: AppColors.muted)),
       const SizedBox(height: 10),
       ClipRRect(
         borderRadius: BorderRadius.circular(6),
-        child: LinearProgressIndicator(value: simPos / g.length, minHeight: 6, color: _accent, backgroundColor: AppColors.surface),
+        child: LinearProgressIndicator(value: end <= 0 ? 1 : simPos / end, minHeight: 6, color: _accent, backgroundColor: AppColors.surface),
       ),
       const SizedBox(height: 10),
       Wrap(spacing: 8, children: [
