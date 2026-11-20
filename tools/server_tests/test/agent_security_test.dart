@@ -127,11 +127,18 @@ void main() {
         // водитель: документы, карта для выплат, блокировки, заявки на маршруты, оценка пассажиров
         'driver_block_passenger', 'driver_blocked_passengers', 'driver_rate_passenger', 'driver_request_route',
         'driver_save_document', 'driver_set_payout_card_sim', 'driver_unblock_passenger', 'staff_review_route_request',
-        // нужна правилу видимости рейсов (заблокированный пассажир не видит рейсов водителя)
-        '_can_see_trip',
       ];
       expect((await executable('authenticated')).split(',').toSet(), allowed.toSet());
       expect(await executable('anon'), '', reason: 'без входа нельзя вызвать ни одну функцию');
+      // Проверка видимости рейсов лежит в схеме private: её вызывает правило видимости, но не API.
+      expect(
+        await w.scalar('''
+          select coalesce(string_agg(p.proname, ',' order by p.proname), '')
+          from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+          where n.nspname = 'private' and has_function_privilege('authenticated', p.oid, 'execute')'''),
+        '_can_see_trip',
+      );
+      expect(await w.scalar("select has_schema_privilege('anon', 'private', 'usage')"), false);
     });
 
     test('ни одной таблице не выдано право на изменение; без входа нет и чтения', () async {
