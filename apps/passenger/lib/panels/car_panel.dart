@@ -77,6 +77,8 @@ class _CarPanelState extends State<CarPanel> {
         return;
       }
       toast(context, 'Оплачено ${amd(r.amount)}. Места ваши. Напомним за 30 и за 5 минут до отправления.');
+      // Сверху поиска теперь карточка «Ваша поездка» — прежние результаты поиска убираем, чтобы не повторяться.
+      h.resetSearch();
       // Разрешения на напоминания — после первой покупки: сначала уведомления, затем точное время.
       await _askReminderPermissions();
       if (!mounted) return;

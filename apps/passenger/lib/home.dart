@@ -273,6 +273,23 @@ class HomeState extends State<HomeScreen> with WidgetsBindingObserver {
     syncMap();
   }
 
+  /// Очистить поиск (после покупки: сверху уже карточка «Ваша поездка», старые результаты поиска не нужны).
+  void resetSearch() {
+    update(() {
+      from = null;
+      to = null;
+      fromOnMap = false;
+      routeId = null;
+      hour = null;
+      meetFilter = null;
+      pick = null;
+      fromCtl.clear();
+      toCtl.clear();
+      suggestions = [];
+      suggestFor = null;
+    });
+  }
+
   /// Выбрать маршрут из найденных (из списка или касанием линии на карте).
   void chooseRoute(String id) {
     update(() {
