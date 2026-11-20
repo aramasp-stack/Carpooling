@@ -67,7 +67,7 @@ extension SearchPanel on HomeState {
   Widget _whereRow(String which) {
     final ctl = which == 'from' ? fromCtl : toCtl;
     // «Куда» заполнено и тогда, когда маршрут выбран из списка или на карте.
-    final value = which == 'from' ? from : (to ?? (routeId == null ? null : Demo.routeById(routeId!)?.to));
+    final value = which == 'from' ? from : (to ?? (routeId == null ? null : repo.routeById(routeId!)?.to));
     return Row(children: [
       Swatch(which == 'from' ? AppColors.from : AppColors.to, size: 10),
       const SizedBox(width: 10),
@@ -240,6 +240,7 @@ extension SearchPanel on HomeState {
         ]),
       );
     }
+    if (repo.error != null && !repo.loaded) return _loadError();
     if (loading) return const Padding(padding: EdgeInsets.all(24), child: Center(child: CircularProgressIndicator()));
     final m = matches;
     final active = activeOf(m);
@@ -263,6 +264,16 @@ extension SearchPanel on HomeState {
       for (final x in m) _routeCard(x),
     ]);
   }
+
+  /// Нет связи с сервером: что случилось и кнопка «Повторить».
+  Widget _loadError() => Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(children: [
+          Text(repo.error!, textAlign: TextAlign.center, style: const TextStyle(color: AppColors.danger)),
+          const SizedBox(height: 10),
+          OutlinedButton(onPressed: _load, child: const Text('Повторить')),
+        ]),
+      );
 
   /// «место посадки рядом» или «до места посадки 400 м пешком».
   String meetText(double walk) => walk < 120 ? 'место посадки рядом с вами' : 'до места посадки ${meters(walk)} пешком';

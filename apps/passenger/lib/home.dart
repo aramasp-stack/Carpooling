@@ -1,9 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:geolocator/geolocator.dart';
 import 'package:transport_core/transport_core.dart';
+import 'package:transport_server/transport_server.dart';
 import 'package:transport_ui/transport_ui.dart';
+
+import 'repo.dart';
 
 part 'panels/search_panel.dart';
 part 'panels/car_panel.dart';
@@ -40,8 +44,11 @@ class TrackPane extends Pane {
 class MinePane extends Pane {}
 
 class HomeScreen extends StatefulWidget {
-  const HomeScreen({super.key, required this.data});
-  final DataStore data;
+  const HomeScreen({super.key, required this.repo, required this.onSignOut});
+  final PassengerRepo repo;
+
+  /// Выйти из учётной записи (вернуться к входу по номеру).
+  final VoidCallback onSignOut;
 
   @override
   State<HomeScreen> createState() => HomeState();
@@ -51,8 +58,11 @@ class HomeState extends State<HomeScreen> {
   final map = TransportMapController();
   final sheet = DraggableScrollableController();
   final loader = RouteLoader();
-  late final trips = TripService(widget.data);
-  DataStore get data => widget.data;
+  /// Данные с сервера: маршруты, рейсы, карты, брони.
+  PassengerRepo get repo => widget.repo;
+
+  /// Расписание рейсов (с сервера).
+  PassengerRepo get trips => widget.repo;
 
   Map<String, RouteGeometry> geoms = {};
   bool loading = true;
@@ -92,18 +102,34 @@ class HomeState extends State<HomeScreen> {
     // Карта открывается там, где пассажир; если это неизвестно — на площади Республики.
     map.showAround(Demo.republicSquare.point);
     _locateOnStart();
-    loader.loadAll(Demo.routes).then((g) {
-      if (!mounted) return;
-      setState(() {
-        geoms = g;
-        loading = false;
-      });
-      syncMap();
+    repo.addListener(_onRepo);
+    _load();
+  }
+
+  /// Загрузить данные с сервера, затем линии маршрутов по дорогам (Яндекс).
+  Future<void> _load() async {
+    update(() => loading = true);
+    await repo.loadAll();
+    if (!mounted) return;
+    final g = await loader.loadAll(repo.routes);
+    if (!mounted) return;
+    setState(() {
+      geoms = g;
+      loading = false;
     });
+    syncMap();
+  }
+
+  /// Данные на сервере изменились (бронь, отмена, свежие рейсы) — перерисовать.
+  void _onRepo() {
+    if (!mounted) return;
+    setState(() {});
+    if (stack.length == 1 || pane is TicketPane) syncMap(refit: false);
   }
 
   @override
   void dispose() {
+    repo.removeListener(_onRepo);
     simTimer?.cancel();
     sheet.dispose();
     fromCtl.dispose();
@@ -130,6 +156,8 @@ class HomeState extends State<HomeScreen> {
 
   void goTab(HomeTab t, {Pane? open}) {
     stopSim();
+    // Свободные места меняются: их покупают другие пассажиры. Свои брони — тоже свежие.
+    if (open == null) t == HomeTab.search ? repo.refreshTrips() : repo.refreshMine();
     update(() {
       tab = t;
       pick = null;
@@ -154,7 +182,7 @@ class HomeState extends State<HomeScreen> {
 
   List<RouteMatch> _matchesTo(GeoPoint? toPoint) => from == null
       ? const []
-      : matchRoutes(geometries: geoms, routes: Demo.routes, from: from!.point, to: toPoint, nearMeters: Demo.nearMeters)
+      : matchRoutes(geometries: geoms, routes: repo.routes, from: from!.point, to: toPoint, nearMeters: Demo.nearMeters)
           .where((m) => meetWalk(m) <= meetLimit)
           .toList();
 
@@ -225,7 +253,7 @@ class HomeState extends State<HomeScreen> {
       routeId = id;
       hour = null;
       meetFilter = null;
-      if (to == null) toCtl.text = Demo.routeById(id)?.to.name ?? '';
+      if (to == null) toCtl.text = repo.routeById(id)?.to.name ?? '';
     });
     syncMap();
   }
@@ -360,8 +388,8 @@ class HomeState extends State<HomeScreen> {
   /// Последние маршруты пассажира (по его броням), не больше трёх.
   List<RouteDef> get recentRoutes {
     final out = <RouteDef>[];
-    for (final b in data.bookings()) {
-      final r = Demo.routeById(b.routeId);
+    for (final m in repo.mine) {
+      final r = repo.routeById(m.booking.routeId);
       if (r != null && !out.any((x) => x.id == r.id)) out.add(r);
       if (out.length == 3) break;
     }
@@ -432,12 +460,7 @@ class HomeState extends State<HomeScreen> {
     ].where((x) => x.at.isAfter(now.add(const Duration(minutes: 5)))).toList();
   }
 
-  Booking? bookingById(String id) {
-    for (final b in data.bookings()) {
-      if (b.id == id) return b;
-    }
-    return null;
-  }
+  Booking? bookingById(String id) => repo.bookingById(id)?.booking;
 
   // ---------- карта ----------
   /// Перерисовать карту. [refit] — заново подобрать камеру (иначе остаётся приближение пассажира).
@@ -482,22 +505,21 @@ class HomeState extends State<HomeScreen> {
         // Камера — на место посадки и путь до него: это главное при выборе водителя.
         map.fit([meet, if (from != null) from!.point, g.pointAt(trip.meetAlong + 600)]);
       case TicketPane(:final bookingId):
-        final b = bookingById(bookingId);
-        final g = b == null ? null : geoms[b.routeId];
-        final r = b == null ? null : Demo.routeById(b.routeId);
-        if (b == null || g == null || r == null) return;
+        final mb = repo.bookingById(bookingId);
+        final g = mb == null ? null : geoms[mb.booking.routeId];
+        if (mb == null || g == null) return;
+        final t = mb.trip, r = t.route;
         map.showRoutes([MapRoute(r, g)]);
-        map.setSegment(g.subLine(b.pickAlong, b.dropAlong), color: Color(r.color));
-        map.setMarker('pickup', g.pointAt(b.pickAlong), MarkerKind.pickup);
-        map.fit(g.points);
+        map.setSegment(g.subLine(t.meetAlong, t.dropOn(g.length)), color: Color(r.color));
+        map.setMarker('pickup', meetPoint(t, g), MarkerKind.pickup);
+        map.fit([meetPoint(t, g), ...g.points]);
       case TrackPane(:final trip, :final bookingId):
         final g = geoms[trip.route.id];
         if (g == null) return;
         map.showRoutes([MapRoute(trip.route, g)]);
-        final b = bookingId == null ? null : bookingById(bookingId);
-        if (b != null) {
-          map.setSegment(g.subLine(b.pickAlong, b.dropAlong), color: Color(trip.route.color));
-          map.setMarker('pickup', g.pointAt(b.pickAlong), MarkerKind.pickup);
+        if (bookingId != null) {
+          map.setSegment(g.subLine(trip.meetAlong, trip.dropOn(g.length)), color: Color(trip.route.color));
+          map.setMarker('pickup', meetPoint(trip, g), MarkerKind.pickup);
         }
         map.fit(g.points);
       case MinePane():
@@ -532,11 +554,6 @@ class HomeState extends State<HomeScreen> {
       if (simPos >= g.length) {
         simTimer?.cancel();
         simDone = true;
-        if (b != null && b.status == BookingStatus.paid) {
-          b.status = BookingStatus.done;
-          data.updateBooking(b);
-          if (mounted) toast(context, 'Поездка завершена. Оцените водителя.');
-        }
       }
       update(() {});
     });

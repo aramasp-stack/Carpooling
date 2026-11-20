@@ -1,6 +1,6 @@
 part of '../home.dart';
 
-/// Машина: водитель, время посадки, схема салона с ценами мест, одна итоговая сумма, оплата.
+/// Машина: водитель, время посадки, схема салона с ценами мест, одна итоговая сумма, оплата привязанной картой.
 class CarPanel extends StatefulWidget {
   const CarPanel({super.key, required this.home, required this.match, required this.trip});
   final HomeState home;
@@ -13,16 +13,22 @@ class CarPanel extends StatefulWidget {
 
 class _CarPanelState extends State<CarPanel> {
   final selected = <String>{};
+  bool busy = false;
+
+  /// Номер операции оплаты. Тот же номер при повторе (например, пропала связь) не спишет деньги дважды;
+  /// новый номер — только для новой попытки после ответа сервера.
+  String _opKey = ServerApi.newOperationKey();
 
   Seat _seat(String id) => widget.trip.seats.firstWhere((s) => s.id == id);
   int get total => selected.fold(0, (sum, id) => sum + _seat(id).price);
+  List<String> get _ids => carSeatIds.where(selected.contains).toList();
 
   @override
   Widget build(BuildContext context) {
     final h = widget.home, m = widget.match, t = widget.trip;
     final dropAt = h.trips.timeAt(t, t.dropOn(m.geometry.length), m.geometry);
     final walk = h.walkTo(t, m.geometry);
-    final order = ['front', 'rl', 'rm', 'rr'].where(selected.contains).map((id) => _seat(id).label).join(', ');
+    final order = _ids.map((id) => _seat(id).label).join(', ');
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       BackLink('К водителям', onTap: h.pop),
       DriverCard(t.driver, color: Color(m.route.color)),
@@ -37,14 +43,17 @@ class _CarPanelState extends State<CarPanel> {
         seats: t.seats,
         selected: selected,
         color: _accent,
-        onToggle: (id) => setState(() => selected.contains(id) ? selected.remove(id) : selected.add(id)),
+        onToggle: (id) => setState(() {
+          selected.contains(id) ? selected.remove(id) : selected.add(id);
+          _opKey = ServerApi.newOperationKey();
+        }),
       ),
       const NoteBox('Водитель ждёт в месте посадки и отправляется по расписанию — подойдите заранее. По пути водитель не останавливается: высадка в конце маршрута, в месте, которое указал водитель.'),
       PayBar(
         caption: selected.isEmpty ? 'Места не выбраны' : order,
         total: amd(total),
-        button: 'Оплатить картой',
-        onPressed: selected.isEmpty ? null : _pay,
+        button: busy ? 'Оплачиваем…' : 'Оплатить картой',
+        onPressed: selected.isEmpty || busy ? null : _pay,
       ),
       const Padding(
         padding: EdgeInsets.only(top: 8),
@@ -55,39 +64,137 @@ class _CarPanelState extends State<CarPanel> {
   }
 
   Future<void> _pay() async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (c) => AlertDialog(
+    final h = widget.home;
+    final cardId = await chooseCard(context, h.repo, total: total);
+    if (cardId == null || !mounted) return;
+    setState(() => busy = true);
+    try {
+      final r = await h.repo.book(trip: widget.trip, seats: _ids, cardId: cardId, key: _opKey);
+      if (!mounted) return;
+      _opKey = ServerApi.newOperationKey();
+      if (!r.paid) {
+        toast(context, reasonText(r.reason ?? 'CARD_DECLINED'));
+        return;
+      }
+      toast(context, 'Оплачено ${amd(r.amount)}. Места ваши.');
+      h.goTab(HomeTab.mine, open: TicketPane(r.bookingId));
+    } on ServerError catch (e) {
+      if (!mounted) return;
+      toast(context, e.text);
+      // Связь пропала — ответ неизвестен: номер операции оставляем, повтор не спишет дважды.
+      if (e.code != 'NETWORK') _opKey = ServerApi.newOperationKey();
+      // Место уже купили или продажа закрыта — вернуться к свежему списку рейсов.
+      if (e.code == 'SEAT_TAKEN' || e.code == 'TRIP_CLOSED' || e.code == 'TRIP_NOT_FOUND') {
+        await h.repo.refreshTrips();
+        h.pop();
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+}
+
+/// Выбор карты для оплаты (или привязка первой). Возвращает id карты; null — передумали.
+Future<String?> chooseCard(BuildContext context, PassengerRepo repo, {required int total}) async {
+  if (repo.cards.isEmpty) {
+    final id = await addCardDialog(context, repo);
+    if (id == null || !context.mounted) return null;
+  }
+  var chosen = repo.cards.last.id;
+  return showDialog<String>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setDialog) => AlertDialog(
         title: const Text('Оплата картой'),
-        content: Text('К оплате: ${amd(total)}\n\nЭто демо: деньги не списываются. В рабочей версии здесь откроется защищённая страница банка для карт ArCa, Visa и Mastercard.'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Text('К оплате: ${amd(total)}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 8),
+          RadioGroup<String>(
+            groupValue: chosen,
+            onChanged: (v) => setDialog(() => chosen = v ?? chosen),
+            child: Column(children: [
+              for (final card in repo.cards)
+                RadioListTile<String>(
+                  value: card.id,
+                  contentPadding: EdgeInsets.zero,
+                  dense: true,
+                  title: Text(card.title),
+                  secondary: const Icon(Icons.credit_card),
+                ),
+            ]),
+          ),
+          if (repo.cards.length < 5)
+            TextButton.icon(
+              onPressed: () async {
+                final id = await addCardDialog(c, repo);
+                if (id != null) setDialog(() => chosen = id);
+              },
+              icon: const Icon(Icons.add),
+              label: const Text('Другая карта'),
+            ),
+          const Text('Пока банк не подключён, оплата — симуляция: деньги не списываются.',
+              style: TextStyle(fontSize: 12, color: AppColors.muted)),
+        ]),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Отмена')),
+          TextButton(onPressed: () => Navigator.pop(c), child: const Text('Отмена')),
+          FilledButton(onPressed: () => Navigator.pop(c, chosen), child: Text('Оплатить ${amd(total)}')),
+        ],
+      ),
+    ),
+  );
+}
+
+/// Привязать карту (симуляция банка). Возвращает id новой карты; null — передумали.
+Future<String?> addCardDialog(BuildContext context, PassengerRepo repo) async {
+  final ctl = TextEditingController();
+  String? error;
+  var busy = false;
+  final id = await showDialog<String>(
+    context: context,
+    builder: (c) => StatefulBuilder(
+      builder: (c, setDialog) => AlertDialog(
+        title: const Text('Привязать карту'),
+        content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          TextField(
+            controller: ctl,
+            autofocus: true,
+            keyboardType: TextInputType.number,
+            inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9 ]')), LengthLimitingTextInputFormatter(19)],
+            decoration: InputDecoration(labelText: 'Номер карты', hintText: '4111 1111 1111 1111', errorText: error),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Тестовая карта: 4111 1111 1111 1111. Карта на …0002 — банк откажет, на …0119 — банк недоступен. '
+            'Номер карты хранит банк; в приложении остаются только последние 4 цифры.',
+            style: TextStyle(fontSize: 12, color: AppColors.muted),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: busy ? null : () => Navigator.pop(c), child: const Text('Отмена')),
           FilledButton(
-            onPressed: () => Navigator.pop(c, true),
-            style: FilledButton.styleFrom(minimumSize: const Size(0, 44)),
-            child: const Text('Оплатить (демо)'),
+            onPressed: busy
+                ? null
+                : () async {
+                    setDialog(() {
+                      busy = true;
+                      error = null;
+                    });
+                    try {
+                      final id = await repo.bindCard(ctl.text);
+                      if (c.mounted) Navigator.pop(c, id);
+                    } on ServerError catch (e) {
+                      setDialog(() {
+                        busy = false;
+                        error = e.text;
+                      });
+                    }
+                  },
+            child: const Text('Привязать'),
           ),
         ],
       ),
-    );
-    if (ok != true || !mounted) return;
-    final h = widget.home, m = widget.match, t = widget.trip;
-    final ids = ['front', 'rl', 'rm', 'rr'].where(selected.contains).toList();
-    final b = Booking(
-      id: 'B${DateTime.now().millisecondsSinceEpoch.toRadixString(36).toUpperCase()}',
-      tripId: t.id,
-      routeId: m.route.id,
-      pickAlong: t.meetAlong,
-      dropAlong: t.dropOn(m.geometry.length),
-      fromName: '${m.route.from.name}, место посадки',
-      toName: m.route.to.name,
-      seatIds: ids,
-      seatLabels: ids.map((id) => _seat(id).label).toList(),
-      amount: total,
-    );
-    await h.data.addBooking(b);
-    if (!mounted) return;
-    toast(context, 'Оплата прошла (демо). Места забронированы.');
-    h.goTab(HomeTab.mine, open: TicketPane(b.id));
-  }
+    ),
+  );
+  ctl.dispose();
+  return id;
 }

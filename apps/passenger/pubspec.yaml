@@ -40,6 +40,8 @@ dependencies:
     path: ../../packages/core
   transport_ui:
     path: ../../packages/ui
+  transport_server:
+    path: ../../packages/server
   geolocator: ^14.1.2
 
 dev_dependencies:

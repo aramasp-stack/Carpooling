@@ -13,8 +13,8 @@ extension TrackPanel on HomeState {
       if (simPos < b.pickAlong - 10) {
         eta = 'Машина подъедет через ${minutesText(left(b.pickAlong))}';
         sub = '${d.car}, ${d.carColor}, ${d.plate}';
-      } else if (simPos < b.dropAlong - 10) {
-        eta = 'В пути: до места ${minutesText(left(b.dropAlong))}';
+      } else if (simPos < trip.dropOn(g.length) - 10) {
+        eta = 'В пути: до места ${minutesText(left(trip.dropOn(g.length)))}';
         sub = b.toName;
       } else {
         eta = 'Вы приехали';
@@ -27,7 +27,7 @@ extension TrackPanel on HomeState {
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       BackLink('Назад', onTap: pop),
       Text(trip.route.title, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
-      const Text('Симуляция: машина едет по линии маршрута без реального GPS.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
+      const Text('Пока это симуляция: настоящая точка машины появится, когда водители начнут работать в приложении.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
       const SizedBox(height: 10),
       Text(eta, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
       Text(sub, style: const TextStyle(color: AppColors.muted)),
