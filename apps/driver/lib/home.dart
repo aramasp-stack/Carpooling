@@ -178,21 +178,44 @@ class DriverHomeState extends State<DriverHome> {
     );
   }
 
-  /// Рейсы водителя на день: без отменённых. В демо-расписании у водителя рейсы на разных маршрутах
-  /// идут внахлёст, а в жизни водитель в двух рейсах сразу быть не может: оставляем те, что не пересекаются
-  /// (созданные в приложении — в первую очередь).
+  /// Рейсы водителя на день: только те, что он сам поставил в приложении, без отменённых.
+  /// (Демо-расписание для приложения пассажира водителю не показываем: это чужие рейсы.)
   List<Trip> myTrips(int dayOffset) {
     final cancelled = me.cancelledTrips;
-    final all = trips.driverTrips(_demo, dayOffset).where((t) => !cancelled.contains(t.id)).toList()
-      ..sort((a, b) => a.custom == b.custom ? a.departure.compareTo(b.departure) : (a.custom ? -1 : 1));
-    final kept = <Trip>[];
-    for (final t in all) {
-      final end = endOf(t);
-      if (kept.every((k) => !(k.departure.isBefore(end.add(const Duration(minutes: 10))) && endOf(k).add(const Duration(minutes: 10)).isAfter(t.departure)))) {
-        kept.add(t);
+    return trips
+        .driverTrips(_demo, dayOffset)
+        .where((t) => t.custom && !cancelled.contains(t.id))
+        .map(_withDemoSales)
+        .toList();
+  }
+
+  Trip? tripOf(String id) {
+    final t = trips.tripById(id);
+    return t == null ? null : _withDemoSales(t);
+  }
+
+  /// Места, которые в модели «купили» демо-пассажиры (пока приложения не связаны через сервер).
+  Trip _withDemoSales(Trip t) {
+    final sold = me.demoSales[t.id] ?? const {};
+    for (final s in t.seats) {
+      final name = sold[s.id];
+      if (name != null && !s.taken) {
+        s.taken = true;
+        s.passenger = name;
       }
     }
-    return kept..sort((a, b) => a.departure.compareTo(b.departure));
+    return t;
+  }
+
+  /// Демо: 1–2 свободных места рейса покупают пассажиры (заблокированные водителем — не покупают).
+  Future<void> sellDemoSeats(Trip t) async {
+    final free = t.seats.where((s) => !s.taken).toList()..shuffle();
+    if (free.isEmpty) return;
+    final taken = t.seats.where((s) => s.taken).map((s) => s.passenger).toSet();
+    final names = Demo.demoPassengers.where((n) => !me.isBlocked(n) && !taken.contains(n)).toList()..shuffle();
+    final n = free.length == 1 ? 1 : 2;
+    await me.sellDemo(t.id, {for (var i = 0; i < n && i < names.length; i++) free[i].id: names[i]});
+    update(() {});
   }
 
   TripStatus statusOf(Trip t) => trips.statusOf(t, geoOf(t.route));
@@ -232,7 +255,7 @@ class DriverHomeState extends State<DriverHome> {
     final p = pane;
     switch (p) {
       case TripPane(:final tripId) || DrivePane(:final tripId):
-        final t = trips.tripById(tripId);
+        final t = tripOf(tripId);
         if (t == null) return;
         final g = geoOf(t.route);
         map.showRoutes([MapRoute(t.route, g)]);

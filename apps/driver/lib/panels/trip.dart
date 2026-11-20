@@ -3,7 +3,7 @@ part of '../home.dart';
 /// Рейс: пассажиры (сел / не пришёл, звонок, оценка, блокировка), деньги, начать / завершить / отменить / повторить.
 extension TripScreen on DriverHomeState {
   Widget tripPanel(String id) {
-    final t = trips.tripById(id);
+    final t = tripOf(id);
     if (t == null || me.cancelledTrips.contains(id)) return BackLink('Мои рейсы', onTap: () => goTab(DriverTab.trips));
     final status = statusOf(t);
     final marks = data.boarding(t.id);
@@ -29,6 +29,16 @@ extension TripScreen on DriverHomeState {
       ]),
       SectionTitle('Пассажиры · ${taken.length} из ${t.seats.length}'),
       if (taken.isEmpty) const Text('Пока никто не купил место.', style: TextStyle(color: AppColors.muted)),
+      // Пока приложения не связаны через сервер, покупки пассажиров в модели изображает эта кнопка.
+      if (status == TripStatus.planned && taken.length < t.seats.length)
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => sellDemoSeats(t),
+            icon: const Icon(Icons.person_add_alt, size: 18),
+            label: const Text('Демо: пассажиры покупают места'),
+          ),
+        ),
       for (final s in taken) _paxRow(t, s, marks[s.id], status, early),
       for (final s in t.seats.where((s) => !s.taken))
         Container(
@@ -279,7 +289,7 @@ extension TripScreen on DriverHomeState {
 
   // ---------- поездка ----------
   Widget drivePanel(String id) {
-    final t = trips.tripById(id);
+    final t = tripOf(id);
     if (t == null) return const SizedBox.shrink();
     final g = geoOf(t.route);
     final toMeet = t.meetAlong - simPos;

@@ -222,7 +222,7 @@ class _NewTripPanelState extends State<NewTripPanel> {
       seats: [for (final s in seats.where((s) => s.on)) Seat(id: s.seat.id, label: s.seat.label, price: s.price)],
     ));
     if (!mounted) return;
-    toast(context, 'Рейс опубликован: пассажиры увидят его в поиске.');
+    toast(context, 'Рейс опубликован. В модели покупки пассажиров изображает кнопка «Демо: пассажиры покупают места».');
     h.onMapTapHandler = null;
     h.update(() {
       h.day = day;

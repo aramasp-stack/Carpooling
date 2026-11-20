@@ -265,6 +265,19 @@ class DriverStore {
     return r;
   }
 
+  // ---------- демо-продажи ----------
+  /// Места, «купленные» демо-пассажирами: рейс → место → имя. Только для модели, пока приложения не связаны сервером.
+  Map<String, Map<String, String>> get demoSales => {
+        for (final e in ((_all()['demoSales'] as Map?) ?? const {}).entries)
+          e.key as String: Map<String, String>.from(e.value as Map),
+      };
+
+  Future<void> sellDemo(String tripId, Map<String, String> seats) {
+    final all = demoSales;
+    all[tripId] = {...?all[tripId], ...seats};
+    return _put('demoSales', all);
+  }
+
   // ---------- отменённые рейсы ----------
   Set<String> get cancelledTrips => ((_all()['cancelled'] as List?) ?? const []).cast<String>().toSet();
 

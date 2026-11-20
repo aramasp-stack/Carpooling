@@ -38,7 +38,12 @@ extension TripsPanel on DriverHomeState {
   Widget _noTripToday() => Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(color: _accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
-        child: Text('Здравствуйте, ${_demo.name}! На сегодня рейсов больше нет.', style: const TextStyle(fontWeight: FontWeight.w600)),
+        child: Text(
+          myTrips(0).isEmpty && myTrips(1).isEmpty
+              ? 'Здравствуйте, ${_demo.name}! Рейсов пока нет: нажмите «Новый рейс», выберите маршрут, время и цены мест.'
+              : 'Здравствуйте, ${_demo.name}! На сегодня рейсов больше нет.',
+          style: const TextStyle(fontWeight: FontWeight.w600),
+        ),
       );
 
   /// Ближайший рейс сегодня: время, место посадки, сколько продано и на какую сумму.
