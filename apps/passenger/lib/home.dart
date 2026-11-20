@@ -7,6 +7,7 @@ import 'package:transport_core/transport_core.dart';
 import 'package:transport_server/transport_server.dart';
 import 'package:transport_ui/transport_ui.dart';
 
+import 'reminders.dart';
 import 'repo.dart';
 
 part 'panels/search_panel.dart';
@@ -54,7 +55,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => HomeState();
 }
 
-class HomeState extends State<HomeScreen> {
+class HomeState extends State<HomeScreen> with WidgetsBindingObserver {
   final map = TransportMapController();
   final sheet = DraggableScrollableController();
   final loader = RouteLoader();
@@ -89,6 +90,9 @@ class HomeState extends State<HomeScreen> {
   List<Pane> stack = [SearchPane()];
   Pane get pane => stack.last;
 
+  /// Раз в полминуты перерисовать экран: отсчёт «через N мин» до своей поездки.
+  Timer? _tick;
+
   // Симуляция движения машины
   Timer? simTimer;
   double simPos = 0;
@@ -103,7 +107,11 @@ class HomeState extends State<HomeScreen> {
     map.showAround(Demo.republicSquare.point);
     _locateOnStart();
     repo.addListener(_onRepo);
+    WidgetsBinding.instance.addObserver(this);
+    // Нажатие на напоминание о поездке открывает билет.
+    TripReminders.onTap = (id) => goTab(HomeTab.mine, open: TicketPane(id));
     _load();
+    _tick = Timer.periodic(const Duration(seconds: 30), (_) => update(() {}));
   }
 
   /// Загрузить данные с сервера, затем линии маршрутов по дорогам (Яндекс).
@@ -118,6 +126,21 @@ class HomeState extends State<HomeScreen> {
       loading = false;
     });
     syncMap();
+    // Приложение открыли нажатием на напоминание — сразу билет.
+    final fromReminder = TripReminders.launchBookingId;
+    if (fromReminder != null && repo.bookingById(fromReminder) != null) {
+      TripReminders.launchBookingId = null;
+      goTab(HomeTab.mine, open: TicketPane(fromReminder));
+    }
+  }
+
+  /// Вернулись в приложение (например, из настроек или из другого приложения) — свежие места и брони,
+  /// напоминания перестраиваются с текущими разрешениями.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !repo.loaded) return;
+    repo.refreshMine();
+    repo.refreshTrips();
   }
 
   /// Данные на сервере изменились (бронь, отмена, свежие рейсы) — перерисовать.
@@ -130,6 +153,9 @@ class HomeState extends State<HomeScreen> {
   @override
   void dispose() {
     repo.removeListener(_onRepo);
+    WidgetsBinding.instance.removeObserver(this);
+    TripReminders.onTap = null;
+    _tick?.cancel();
     simTimer?.cancel();
     sheet.dispose();
     fromCtl.dispose();
@@ -472,6 +498,19 @@ class HomeState extends State<HomeScreen> {
       case SearchPane():
         if (from != null) map.setMarker('from', from!.point, MarkerKind.from);
         if (to != null) map.setMarker('to', to!.point, MarkerKind.to);
+        // Своя ближайшая поездка видна на карте всегда: место посадки с подписью.
+        final mine = repo.upcoming.isEmpty ? null : repo.upcoming.first;
+        final mineGeom = mine == null ? null : geoms[mine.trip.route.id];
+        if (mine != null && mineGeom != null) {
+          final meet = meetPoint(mine.trip, mineGeom);
+          map.setMarker('my-meet', meet, MarkerKind.myMeet, hint: 'Ваша посадка · ${hhmm(mine.trip.departure)}');
+          if (from == null) {
+            // Пока ничего не ищем — на карте путь своей поездки.
+            map.showRoutes([MapRoute(mine.trip.route, mineGeom)]);
+            map.setSegment(mineGeom.subLine(mine.trip.meetAlong, mine.trip.dropOn(mineGeom.length)), color: Color(mine.trip.route.color));
+            if (refit) map.fit([meet, ...mineGeom.points]);
+          }
+        }
         if (from == null || geoms.isEmpty) return;
         final m = matches;
         final active = activeOf(m);
@@ -511,7 +550,8 @@ class HomeState extends State<HomeScreen> {
         final t = mb.trip, r = t.route;
         map.showRoutes([MapRoute(r, g)]);
         map.setSegment(g.subLine(t.meetAlong, t.dropOn(g.length)), color: Color(r.color));
-        map.setMarker('pickup', meetPoint(t, g), MarkerKind.pickup);
+        map.setMarker('pickup', meetPoint(t, g), mb.booking.status == BookingStatus.paid ? MarkerKind.myMeet : MarkerKind.pickup,
+            hint: mb.booking.status == BookingStatus.paid ? 'Ваша посадка · ${hhmm(t.departure)}' : null);
         map.fit([meetPoint(t, g), ...g.points]);
       case TrackPane(:final trip, :final bookingId):
         final g = geoms[trip.route.id];
@@ -603,9 +643,16 @@ class HomeState extends State<HomeScreen> {
         bottomBar: NavigationBar(
           selectedIndex: tab.index,
           onDestinationSelected: (i) => goTab(HomeTab.values[i]),
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.search), label: 'Поиск'),
-            NavigationDestination(icon: Icon(Icons.confirmation_number_outlined), label: 'Мои поездки'),
+          destinations: [
+            const NavigationDestination(icon: Icon(Icons.search), label: 'Поиск'),
+            NavigationDestination(
+              icon: Badge(
+                isLabelVisible: repo.upcoming.isNotEmpty,
+                label: Text('${repo.upcoming.length}'),
+                child: const Icon(Icons.confirmation_number_outlined),
+              ),
+              label: 'Мои поездки',
+            ),
           ],
         ),
       ),

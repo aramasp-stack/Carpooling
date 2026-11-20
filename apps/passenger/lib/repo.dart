@@ -2,6 +2,8 @@ import 'package:flutter/foundation.dart';
 import 'package:transport_core/transport_core.dart';
 import 'package:transport_server/transport_server.dart';
 
+import 'reminders.dart';
+
 /// Данные пассажира с сервера: маршруты, рейсы на 3 дня, водители, карты и свои брони.
 /// Экраны берут данные отсюда; после любого изменения на сервере данные перечитываются.
 class PassengerRepo extends ChangeNotifier {
@@ -39,6 +41,7 @@ class PassengerRepo extends ChangeNotifier {
       await _loadTrips();
       cards = await api.cards();
       mine = await api.myBookings(routes: _infoById, drivers: drivers);
+      TripReminders.sync(upcoming);
       loaded = true;
       error = null;
     } on ServerError catch (e) {
@@ -74,6 +77,7 @@ class PassengerRepo extends ChangeNotifier {
   Future<void> refreshMine() async {
     try {
       mine = await api.myBookings(routes: _infoById, drivers: drivers);
+      TripReminders.sync(upcoming);
       cards = await api.cards();
     } on ServerError catch (e) {
       error = e.text;
@@ -97,6 +101,21 @@ class PassengerRepo extends ChangeNotifier {
     }
     for (final m in mine) {
       if (m.trip.id == id) return m.trip;
+    }
+    return null;
+  }
+
+  /// Предстоящие оплаченные поездки, ближайшая первой. Поездка остаётся здесь ещё 15 минут после отправления.
+  List<MyBooking> get upcoming {
+    final n = now.subtract(const Duration(minutes: 15));
+    return [for (final m in mine) if (m.booking.status == BookingStatus.paid && m.trip.departure.isAfter(n)) m]
+      ..sort((a, b) => a.trip.departure.compareTo(b.trip.departure));
+  }
+
+  /// Моя оплаченная бронь на этот рейс (если есть).
+  MyBooking? myBookingOnTrip(String tripId) {
+    for (final m in mine) {
+      if (m.trip.id == tripId && m.booking.status == BookingStatus.paid) return m;
     }
     return null;
   }
@@ -147,6 +166,7 @@ class PassengerRepo extends ChangeNotifier {
     await api.signOut();
     profile = null;
     mine = [];
+    TripReminders.sync(const []);
     cards = [];
     notifyListeners();
   }

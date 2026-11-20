@@ -12,6 +12,7 @@ extension SearchPanel on HomeState {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (pick != null) _pickHint(),
+          if (pick == null && repo.upcoming.isNotEmpty) _myTripCard(),
           _whereBox(),
           if (suggestFor == 'to') _suggestBox(),
           if (from == null && suggestFor == null) _recent(),
@@ -30,6 +31,57 @@ extension SearchPanel on HomeState {
             const NoteBox('Ключ Яндекс MapKit не задан: карта не показывается, маршруты считаются по прямой. Остальное работает.'),
         ],
       );
+
+  /// Своя ближайшая поездка — всегда сверху, пока она не состоялась. Нажатие открывает билет.
+  Widget _myTripCard() {
+    final list = repo.upcoming;
+    final m = list.first;
+    final t = m.trip, d = t.driver, now = trips.now;
+    final left = t.departure.difference(now).inMinutes;
+    final soon = left <= 30;
+    final when = left <= 0
+        ? 'отправление сейчас'
+        : left < 60
+            ? 'через $left ${plural(left, 'минуту', 'минуты', 'минут')}'
+            : dayOffsetOf(t.departure, now: now) == 0
+                ? 'через ${left ~/ 60} ч${left % 60 > 0 ? ' ${left % 60} мин' : ''}'
+                : dayLabel(dayOffsetOf(t.departure, now: now), now: now).toLowerCase();
+    const onAccent = Colors.white;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 10),
+      child: Material(
+        color: soon ? const Color(0xFFB45309) : _accent,
+        borderRadius: BorderRadius.circular(18),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(18),
+          onTap: () => goTab(HomeTab.mine, open: TicketPane(m.booking.id)),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 10, 12),
+            child: Row(children: [
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Text('Ваша поездка · $when',
+                      style: const TextStyle(color: onAccent, fontSize: 13, fontWeight: FontWeight.w600)),
+                  const SizedBox(height: 2),
+                  Text('${hhmm(t.departure)}  ${t.route.from.name} → ${t.route.to.name}',
+                      style: const TextStyle(color: onAccent, fontSize: 17, fontWeight: FontWeight.w800)),
+                  const SizedBox(height: 2),
+                  Text('${m.booking.seatLabels.join(', ')} · ${d.name}, ${d.car}, ${d.carColor} · ${d.plate}',
+                      style: const TextStyle(color: onAccent, fontSize: 13)),
+                  if (list.length > 1)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: Text('и ещё ${list.length - 1} — в «Мои поездки»', style: const TextStyle(color: onAccent, fontSize: 12)),
+                    ),
+                ]),
+              ),
+              const Icon(Icons.chevron_right, color: onAccent),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
 
   /// Подсказка, пока пассажир выбирает точку на карте.
   Widget _pickHint() => Container(
@@ -394,15 +446,25 @@ extension SearchPanel on HomeState {
   Widget _driverRow(RouteMatch m, Trip trip, DateTime at) {
     final d = trip.driver;
     final free = trip.freeCount;
+    // Рейс, на который у пассажира уже есть бронь: подсвечен, нажатие открывает билет.
+    final mine = repo.myBookingOnTrip(trip.id);
     return Opacity(
-      opacity: free > 0 ? 1 : 0.5,
+      opacity: free > 0 || mine != null ? 1 : 0.5,
       child: Card(
         elevation: 0,
+        color: mine != null ? _accent.withValues(alpha: 0.08) : null,
         margin: const EdgeInsets.only(bottom: 10),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16), side: const BorderSide(color: AppColors.line)),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: BorderSide(color: mine != null ? _accent : AppColors.line, width: mine != null ? 2 : 1),
+        ),
         child: InkWell(
           borderRadius: BorderRadius.circular(16),
-          onTap: free > 0 ? () => push(CarPane(m, trip)) : null,
+          onTap: mine != null
+              ? () => goTab(HomeTab.mine, open: TicketPane(mine.booking.id))
+              : free > 0
+                  ? () => push(CarPane(m, trip))
+                  : null,
           child: Padding(
             padding: const EdgeInsets.all(12),
             child: Row(children: [
@@ -421,10 +483,14 @@ extension SearchPanel on HomeState {
                     const SizedBox(width: 2),
                     Flexible(child: Text(meetText(walkTo(trip, m.geometry)), style: const TextStyle(fontSize: 13))),
                   ]),
-                  Text(
-                    free > 0 ? 'свободно $free ${plural(free, 'место', 'места', 'мест')}' : 'мест нет',
-                    style: TextStyle(fontSize: 13, color: free > 0 ? AppColors.ok : AppColors.danger),
-                  ),
+                  if (mine != null)
+                    Text('Ваша бронь · ${mine.booking.seatLabels.join(', ')}',
+                        style: const TextStyle(fontSize: 13, color: _accent, fontWeight: FontWeight.w700))
+                  else
+                    Text(
+                      free > 0 ? 'свободно $free ${plural(free, 'место', 'места', 'мест')}' : 'мест нет',
+                      style: TextStyle(fontSize: 13, color: free > 0 ? AppColors.ok : AppColors.danger),
+                    ),
                 ]),
               ),
               Column(crossAxisAlignment: CrossAxisAlignment.end, children: [

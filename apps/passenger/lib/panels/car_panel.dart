@@ -76,8 +76,13 @@ class _CarPanelState extends State<CarPanel> {
         toast(context, reasonText(r.reason ?? 'CARD_DECLINED'));
         return;
       }
-      toast(context, 'Оплачено ${amd(r.amount)}. Места ваши.');
+      toast(context, 'Оплачено ${amd(r.amount)}. Места ваши. Напомним за 30 и за 5 минут до отправления.');
+      // Разрешения на напоминания — после первой покупки: сначала уведомления, затем точное время.
+      await _askReminderPermissions();
+      if (!mounted) return;
       h.goTab(HomeTab.mine, open: TicketPane(r.bookingId));
+      // Напоминания перестраиваются уже с полученными разрешениями.
+      h.repo.refreshMine();
     } on ServerError catch (e) {
       if (!mounted) return;
       toast(context, e.text);
@@ -94,13 +99,35 @@ class _CarPanelState extends State<CarPanel> {
   }
 }
 
+extension on _CarPanelState {
+  /// Уведомления и «точное время» для напоминаний. Системный экран открываем только после понятного объяснения.
+  Future<void> _askReminderPermissions() async {
+    await TripReminders.askNotifications();
+    if (!await TripReminders.needsExactPermission() || !mounted) return;
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (c) => AlertDialog(
+        title: const Text('Напоминания вовремя'),
+        content: const Text('Мы напомним о поездке за 30 и за 5 минут до отправления. Чтобы напоминание пришло '
+            'точно в срок, разрешите приложению «Будильники и напоминания»: откроются настройки телефона — '
+            'включите переключатель и вернитесь назад.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Не сейчас')),
+          FilledButton(onPressed: () => Navigator.pop(c, true), child: const Text('Открыть настройки')),
+        ],
+      ),
+    );
+    if (open == true) await TripReminders.openExactSettings();
+  }
+}
+
 /// Выбор карты для оплаты (или привязка первой). Возвращает id карты; null — передумали.
 Future<String?> chooseCard(BuildContext context, PassengerRepo repo, {required int total}) async {
   if (repo.cards.isEmpty) {
     final id = await addCardDialog(context, repo);
     if (id == null || !context.mounted) return null;
   }
-  var chosen = repo.cards.last.id;
+  var chosen = repo.cards.first.id;
   return showDialog<String>(
     context: context,
     builder: (c) => StatefulBuilder(

@@ -21,7 +21,7 @@ class MapRoute {
 }
 
 /// Виды меток.
-enum MarkerKind { from, to, pickup, pickupSelected, start, finish, passenger, me }
+enum MarkerKind { from, to, pickup, pickupSelected, start, finish, passenger, me, myMeet }
 
 class _Marker {
   const _Marker(this.point, this.kind, this.hint);
@@ -268,10 +268,18 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
           ..setIconStyle(const ym.IconStyle(anchor: math.Point(0.5, 1.0), zIndex: 35));
         continue;
       }
-      layer.addPlacemark()
+      final mark = layer.addPlacemark()
         ..geometry = _pt(m.point)
         ..setIcon(_iconFor(m.kind))
-        ..setIconStyle(const ym.IconStyle(scale: 1, zIndex: 30));
+        ..setIconStyle(ym.IconStyle(scale: 1, zIndex: m.kind == MarkerKind.myMeet ? 35 : 30));
+      // Подпись рядом с меткой (например «Ваша посадка · 09:30»).
+      final hint = m.hint;
+      if (hint != null && hint.isNotEmpty) {
+        mark.setTextWithStyle(
+          const ym.TextStyle(size: 13, color: Color(0xFF1E1B4B), outlineWidth: 2.5, placement: ym.TextStylePlacement.Right, offset: 4),
+          text: hint,
+        );
+      }
     }
     _syncPulse();
   }
@@ -351,6 +359,11 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
     if (kind == MarkerKind.me) {
       return _icons.putIfAbsent('me', () => yi.ImageProvider(_drawMe, id: 'me'));
     }
+    if (kind == MarkerKind.myMeet) {
+      // Место посадки по брони пассажира: самая заметная метка на карте.
+      return _icons.putIfAbsent(
+          'my-meet', () => yi.ImageProvider(() => _drawDot(AppColors.passenger, Colors.white, size: 48), id: 'my-meet'));
+    }
     if (kind == MarkerKind.pickupSelected) {
       // Выбранное место посадки: крупнее и темнее остальных.
       return _icons.putIfAbsent(
@@ -365,6 +378,7 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
       MarkerKind.passenger => (const Color(0xFF2563EB), Colors.white),
       MarkerKind.me => (const Color(0xFF0EA5E9), Colors.white),
       MarkerKind.pickupSelected => (const Color(0xFF1E3A8A), Colors.white),
+      MarkerKind.myMeet => (AppColors.passenger, Colors.white),
     };
     return _icons.putIfAbsent('dot-${kind.name}', () => yi.ImageProvider(() => _drawDot(fill, ring), id: 'dot-${kind.name}'));
   }

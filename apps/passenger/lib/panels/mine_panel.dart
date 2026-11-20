@@ -9,10 +9,8 @@ String phoneText(String phone) {
 /// Мои поездки: брони пассажира с сервера, профиль, карты, выход.
 extension MinePanel on HomeState {
   Widget minePanel() {
-    final now = trips.now;
     final list = repo.mine;
-    final upcoming = [for (final m in list) if (m.booking.status == BookingStatus.paid && m.trip.departure.isAfter(now.subtract(const Duration(hours: 2)))) m]
-      ..sort((a, b) => a.trip.departure.compareTo(b.trip.departure));
+    final upcoming = repo.upcoming;
     final past = [for (final m in list) if (!upcoming.contains(m)) m];
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
       const Text('Мои поездки', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700)),

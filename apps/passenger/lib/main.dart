@@ -5,6 +5,7 @@ import 'package:transport_ui/transport_ui.dart';
 
 import 'home.dart';
 import 'login.dart';
+import 'reminders.dart';
 import 'repo.dart';
 
 /// TransportApp — приложение пассажира. Данные — с сервера, вход по номеру телефона.
@@ -15,6 +16,7 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   await setupMapkit();
   await ServerApi.init();
+  await TripReminders.init();
   runApp(const PassengerApp());
 }
 
