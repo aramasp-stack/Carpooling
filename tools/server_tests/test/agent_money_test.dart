@@ -68,7 +68,7 @@ void main() {
 
   // ---------- помощники ----------
 
-  Future<Actor> newDriver(String name, {int seats = 4}) async {
+  Future<Actor> newDriver(String name, {List<String> seats = carSeats}) async {
     final a = await w.newDriver(name, seats: seats);
     made.add(a);
     return a;
@@ -233,14 +233,14 @@ void main() {
   group('доли: комиссия, госпошлина, водитель', () {
     test('некруглые цены: доли по каждой брони совпадают с расчётом приложения до драма', () async {
       const prices = [1, 3, 7, 10, 25, 99, 149, 333, 1000, 1501, 2999, 50];
-      const seatIds = ['front', 'rl', 'rm', 'rr'];
+      const seatIds = ['front', 'rl', 'rr'];
       final pass = await newPax('Счётный');
       final dep = await inMinutes(40);
       final booked = <String, int>{}; // бронь → цена
       final trips = <(Actor, String, int)>[];
-      for (var i = 0; i < prices.length; i += 4) {
+      for (var i = 0; i < prices.length; i += 3) {
         final d = await newDriver('Водитель цен $i');
-        final seats = {for (var j = 0; j < 4; j++) seatIds[j]: prices[i + j]};
+        final seats = {for (var j = 0; j < 3; j++) seatIds[j]: prices[i + j]};
         final trip = await d.createTrip(wide, dep, seats: seats);
         var sumDriver = 0;
         for (final s in seatIds) {
@@ -392,13 +392,13 @@ void main() {
       final c = await newPax('Рано');
       final x = await newPax('Отказ', card: badCard);
       final dep = await inMinutes(125);
-      final trip = await d.createTrip(wide, dep, seats: {'front': 333, 'rl': 1501, 'rm': 99, 'rr': 7});
+      final trip = await d.createTrip(wide, dep, seats: {'front': 333, 'rl': 1501, 'rr': 99});
       final ba = await a.book(trip, ['front']);
       final bb = await b.book(trip, ['rl']);
-      final bc = await c.book(trip, ['rm']);
-      final bx = await x.book(trip, ['rr']);
-      expect(bx['status'], 'failed');
+      final bc = await c.book(trip, ['rr']);
       expect((await c.cancel(id(bc)))['refund'], 99);
+      final bx = await x.book(trip, ['rr']); // место освободилось, но банк отказал
+      expect(bx['status'], 'failed');
       await advanceTo(dep.subtract(const Duration(minutes: 59)));
       expect((await b.cancel(id(bb)))['refund'], 0);
       await drive(d, trip, dep);
@@ -693,24 +693,27 @@ void main() {
   // =====================================================================================
   group('сроки', () {
     test('отмена за 120, 61, 59 и 10 минут: сервер возвращает ровно столько, сколько обещает приложение', () async {
-      final d = await newDriver('Часы');
+      // В машине три места, поэтому четвёртая бронь — на рейсе второго водителя в то же время.
       final dep = await inMinutes(130);
-      final trip = await d.createTrip(route, dep, seats: {'front': 600, 'rl': 500, 'rm': 450, 'rr': 400});
-      const plan = [(120, 'front', 600), (61, 'rl', 500), (59, 'rm', 450), (10, 'rr', 400)];
-      final books = <String, (Actor, String)>{};
-      for (final (_, seat, _) in plan) {
-        final p = await newPax('Отмена $seat');
-        books[seat] = (p, id(await p.book(trip, [seat])));
+      final trips = [
+        await (await newDriver('Часы')).createTrip(route, dep, seats: {'front': 600, 'rl': 500, 'rr': 450}),
+        await (await newDriver('Часы 2')).createTrip(route, dep, seats: {'front': 400}),
+      ];
+      const plan = [(120, 0, 'front', 600), (61, 0, 'rl', 500), (59, 0, 'rr', 450), (10, 1, 'front', 400)];
+      final books = <int, (Actor, String)>{};
+      for (final (mins, t, seat, _) in plan) {
+        final p = await newPax('Отмена за $mins');
+        books[mins] = (p, id(await p.book(trips[t], [seat])));
       }
-      for (final (mins, seat, amount) in plan) {
+      for (final (mins, t, seat, amount) in plan) {
         await advanceTo(dep.subtract(Duration(minutes: mins)));
-        final (p, b) = books[seat]!;
+        final (p, b) = books[mins]!;
         final app = refundFor(amount: amount, pickupTime: dep, now: await w.now());
         final r = await p.cancel(b);
         expect(r['refund'], mins >= 60 ? amount : 0, reason: 'отмена за $mins минут');
         expect(r['refund'], app, reason: 'приложение обещало $app за $mins минут');
         expect(await led('refund', booking: b), r['refund']);
-        expect(await seatOwner(trip, seat), mins >= 60 ? isNull : b);
+        expect(await seatOwner(trips[t], seat), mins >= 60 ? isNull : b);
       }
     });
 
@@ -1297,7 +1300,7 @@ void main() {
     // драм: бронь на 39 999 996 при комиссии 60% давала «integer out of range», и расчёт падал целиком для всех.
     // Теперь расчёт идёт в bigint, а цены ограничены: базовая цена маршрута — до 1 000 000, место — до трёх базовых цен.
     // Самая дорогая возможная бронь — 4 места по 3 000 000 = 12 000 000 драм; проценты в сумме не больше 100.
-    test('самая дорогая возможная бронь (4 места по 3 000 000) и предельные проценты 96% + 4%: расчёт проходит и сходится до драма', () async {
+    test('самая дорогая возможная бронь (3 места по 3 000 000) и предельные проценты 96% + 4%: расчёт проходит и сходится до драма', () async {
       await settle();
       const saveRoute = 'select staff_save_route(null, @code, @fn, 40.2264, 44.4930, @tn, 40.1777, 44.5126, @p::int, 25, 9000)';
       for (final price in ['3400000', '1000001', '0']) {
@@ -1305,7 +1308,7 @@ void main() {
             reason: 'базовая цена $price вне пределов 1..1 000 000');
       }
       final lux = await w.newRoute('A9', price: 1000000);
-      const seats = ['front', 'rl', 'rm', 'rr'];
+      const seats = ['front', 'rl', 'rr'];
       final d1 = await newDriver('Лимузин');
       final d2 = await newDriver('Почти лимузин');
       final d3 = await newDriver('Лимузин по обычной ставке');
@@ -1320,7 +1323,7 @@ void main() {
       final b1 = await p.book(t1, seats);
       final b2 = await p.book(t2, seats);
       final b3 = await p.book(t3, seats);
-      expect([b1['amount'], b2['amount'], b3['amount']], [12000000, 11999996, 12000000]);
+      expect([b1['amount'], b2['amount'], b3['amount']], [9000000, 8999997, 9000000]);
       await drive(d1, t1, dep);
       await drive(d2, t2, dep);
       await drive(d3, t3, dep3);
@@ -1335,28 +1338,28 @@ void main() {
         await setting('commission_percent', 10);
       }
       expect(refused, isNull, reason: 'accrue_due отказал с кодом $refused (22003 — число не помещается в int)');
-      await expectSplit(id(b1), 12000000, cp: 96, sp: 4);
-      await expectSplit(id(b2), 11999996, cp: 96, sp: 4);
+      await expectSplit(id(b1), 9000000, cp: 96, sp: 4);
+      await expectSplit(id(b2), 8999997, cp: 96, sp: 4);
       Future<List<int>> parts(Map<String, dynamic> b) async =>
           [await led('driver_accrual', booking: id(b)), await led('commission', booking: id(b)), await led('state_duty', booking: id(b))];
-      expect(await parts(b1), [0, 11520000, 480000]);
-      expect(await parts(b2), [1, 11519996, 479999]);
+      expect(await parts(b1), [0, 8640000, 360000]);
+      expect(await parts(b2), [1, 8639997, 359999]);
       expect(await led('driver_accrual', booking: id(b1), count: true), 0, reason: 'нулевая доля в журнал не пишется');
       await expectNoSplit(id(b3));
 
-      // Та же предельная бронь по обычным 10% + 4%: водителю 10 320 000, и выплата проходит на всю сумму.
+      // Та же предельная бронь по обычным 10% + 4%: водителю 7 740 000, и выплата проходит на всю сумму.
       await advanceTo(fin3.add(day));
       expect(await accrue(), 1);
-      await expectSplit(id(b3), 12000000);
-      expect(await parts(b3), [10320000, 1200000, 480000]);
-      await expectTripMoney(t1, charged: 12000000, refunded: 0, shared: 12000000);
-      await expectTripMoney(t2, charged: 11999996, refunded: 0, shared: 11999996);
-      await expectTripMoney(t3, charged: 12000000, refunded: 0, shared: 12000000);
+      await expectSplit(id(b3), 9000000);
+      expect(await parts(b3), [7740000, 900000, 360000]);
+      await expectTripMoney(t1, charged: 9000000, refunded: 0, shared: 9000000);
+      await expectTripMoney(t2, charged: 8999997, refunded: 0, shared: 8999997);
+      await expectTripMoney(t3, charged: 9000000, refunded: 0, shared: 9000000);
       await payouts();
       expect(await payoutCount(d1), 0);
       expect([await payoutCount(d2), await payoutSum(d2)], [1, 1]);
-      expect([await payoutCount(d3), await payoutSum(d3)], [1, 10320000]);
-      expect(await earn(d3), {'accrued': 10320000, 'paid_out': 10320000, 'to_pay': 0});
+      expect([await payoutCount(d3), await payoutSum(d3)], [1, 7740000]);
+      expect(await earn(d3), {'accrued': 7740000, 'paid_out': 7740000, 'to_pay': 0});
     });
 
     test('проценты изменили между двумя начислениями одного водителя: заработок и выплаты сходятся', () async {
@@ -2265,14 +2268,14 @@ void main() {
     // хранится в int (payouts.amount и ledger.amount). Если одному водителю к выплате накопилось больше
     // 2 147 483 647 драм, функция падает с ошибкой базы 22003 «integer out of range». Выплаты всем водителям создаются
     // одной операцией, поэтому, пока такое начисление не выплачено, выплаты не создаются НИКОМУ.
-    // При нынешних пределах цен (место — до 3 000 000 драм) для этого нужно 209 полных рейсов по предельной цене
+    // При нынешних пределах цен (место — до 3 000 000 драм) для этого нужно 278 полных рейсов по предельной цене
     // без единой выплаты — на практике недостижимо, но отказ «сырой» и останавливает выплаты всем.
     // Варианты исправления: bigint для сумм выплат; дробить выплату; понятный отказ только по этому водителю.
     test('водителю накопилось к выплате больше 2 147 483 647 драм: выплата создаётся на всю сумму', () async {
       await settle();
-      const seats = ['front', 'rl', 'rm', 'rr'];
-      const count = 209; // 209 рейсов × 10 320 000 драм водителю = 2 156 880 000 > 2 147 483 647
-      const share = 10320000;
+      const seats = ['front', 'rl', 'rr'];
+      const count = 278; // 278 рейсов × 7 740 000 драм водителю = 2 151 720 000 > 2 147 483 647
+      const share = 7740000;
       final fast = await w.newRoute('A7', price: 1000000, minutes: 1);
       final d = await newDriver('Очень дорогой водитель');
       final p = await newPax('Платит миллиарды');
@@ -2281,7 +2284,7 @@ void main() {
       for (var i = 0; i < count; i++) {
         final dep = base.add(Duration(minutes: 2 * i));
         final trip = await d.createTrip(fast, dep, seats: {for (final s in seats) s: 3000000});
-        expect((await p.book(trip, seats))['amount'], 12000000);
+        expect((await p.book(trip, seats))['amount'], 9000000);
         list.add((trip, dep));
       }
       for (final (trip, dep) in list) {

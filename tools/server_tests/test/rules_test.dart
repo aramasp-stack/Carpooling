@@ -139,13 +139,20 @@ void main() {
   });
 
   test('рейс нельзя поставить с нарушением правил', () async {
-    final driver = await w.newDriver('Сос', seats: 3);
+    final driver = await w.newDriver('Сос', seats: rearSeats);
     final pending = await w.newDriver('Новичок', approve: false);
     final draft = await w.newRoute('D1', publish: false);
     final dep = await inMinutes(300);
-    const fn = 'select driver_create_trip(@r::uuid, @d::timestamptz, @m::int, @s::jsonb)';
-    Map<String, Object?> args({String? r, DateTime? d, int m = 0, String s = '[{"id":"front","price":600}]'}) =>
-        {'r': r ?? route, 'd': (d ?? dep).toUtc().toIso8601String(), 'm': '$m', 's': s};
+    const fn = 'select driver_create_trip(@r::uuid, @d::timestamptz, @m::int, @s::jsonb, @x::int, '
+        '@ma::float8, @mo::float8, @da::float8, @do::float8)';
+    // Точки на карте: (широта, долгота). Маршрут начинается в 40.2264, 44.4930 и кончается в 40.1777, 44.5126.
+    Map<String, Object?> args({String? r, DateTime? d, int m = 0, int? x, String s = '[{"id":"rl","price":600}]',
+            (double, double)? meet, (double, double)? drop, String? onlyLat}) =>
+        {
+          'r': r ?? route, 'd': (d ?? dep).toUtc().toIso8601String(), 'm': '$m', 's': s, 'x': x?.toString(),
+          'ma': onlyLat ?? meet?.$1.toString(), 'mo': meet?.$2.toString(),
+          'da': drop?.$1.toString(), 'do': drop?.$2.toString(),
+        };
 
     expect(await pending.refusal(fn, args()), 'DRIVER_NOT_APPROVED');
     expect(await driver.refusal(fn, args(r: draft)), 'ROUTE_NOT_AVAILABLE');
@@ -153,17 +160,37 @@ void main() {
     expect(await driver.refusal(fn, args(d: await inMinutes(60 * 24 * 8))), 'DEPARTURE_TOO_FAR');
     expect(await driver.refusal(fn, args(m: 1600)), 'MEET_POINT_OUTSIDE_DISTRICT', reason: 'место посадки вне начального района');
     expect(await driver.refusal(fn, args(m: -1)), 'MEET_POINT_OUTSIDE_DISTRICT');
-    expect(await driver.refusal(fn, args(s: '[{"id":"rm","price":400}]')), 'BAD_SEATS', reason: 'в трёхместной машине нет среднего места');
+    // Маршрут длиной 9000 м: место высадки — в последних 1500 м (от 7500 до 9000).
+    expect(await driver.refusal(fn, args(x: 9001)), 'DROP_POINT_OUTSIDE_DISTRICT', reason: 'дальше конца маршрута');
+    expect(await driver.refusal(fn, args(x: 7499)), 'DROP_POINT_OUTSIDE_DISTRICT', reason: 'не в конечном районе');
+    expect(await driver.refusal(fn, args(x: -5)), 'DROP_POINT_OUTSIDE_DISTRICT');
+    // Точное место на карте — внутри круга 1,5 км у начала (конца) маршрута; 0,018° широты ≈ 2 км.
+    expect(await driver.refusal(fn, args(meet: (40.2444, 44.4930))), 'MEET_POINT_OUTSIDE_DISTRICT', reason: '2 км от начала');
+    expect(await driver.refusal(fn, args(meet: (40.1790, 44.5130))), 'MEET_POINT_OUTSIDE_DISTRICT', reason: 'посадка у конца маршрута');
+    expect(await driver.refusal(fn, args(onlyLat: '40.2300')), 'MEET_POINT_OUTSIDE_DISTRICT', reason: 'только широта без долготы');
+    expect(await driver.refusal(fn, args(meet: (91, 44.4930))), 'MEET_POINT_OUTSIDE_DISTRICT');
+    expect(await driver.refusal(fn, args(drop: (40.1597, 44.5126))), 'DROP_POINT_OUTSIDE_DISTRICT', reason: '2 км от конца');
+    expect(await driver.refusal(fn, args(drop: (40.2264, 44.4930))), 'DROP_POINT_OUTSIDE_DISTRICT', reason: 'высадка в начале маршрута');
+    expect(await driver.refusal(fn, args(s: '[{"id":"rm","price":400}]')), 'BAD_SEATS', reason: 'среднего места сзади нет');
+    expect(await driver.refusal(fn, args(s: '[{"id":"front","price":600},{"id":"rl","price":500}]')), 'BAD_SEATS', reason: 'переднее место водитель в анкете не отметил');
     expect(await driver.refusal(fn, args(s: '[{"id":"front","price":600},{"id":"front","price":600}]')), 'BAD_SEATS');
     expect(await driver.refusal(fn, args(s: '[{"id":"trunk","price":600}]')), 'BAD_SEATS');
     expect(await driver.refusal(fn, args(s: '[]')), 'BAD_SEATS');
-    expect(await driver.refusal(fn, args(s: '[{"id":"front","price":0}]')), 'BAD_PRICE');
-    expect(await driver.refusal(fn, args(s: '[{"id":"front","price":1501}]')), 'BAD_PRICE', reason: 'дороже трёх базовых цен');
-    expect(await driver.refusal(fn, args(s: '[{"id":"front","price":"abc"}]')), 'BAD_PRICE');
+    expect(await driver.refusal(fn, args(s: '[{"id":"rl","price":0}]')), 'BAD_PRICE');
+    expect(await driver.refusal(fn, args(s: '[{"id":"rl","price":1501}]')), 'BAD_PRICE', reason: 'дороже трёх базовых цен');
+    expect(await driver.refusal(fn, args(s: '[{"id":"rl","price":"abc"}]')), 'BAD_PRICE');
 
     await driver.q(fn, args());
     expect(await driver.refusal(fn, args(d: dep.add(const Duration(minutes: 10)))), 'TRIP_OVERLAP', reason: 'водитель уже в рейсе в это время');
     expect(await driver.refusal(fn, args(d: dep.add(const Duration(minutes: 30)))), isNull);
+    // Место высадки в конечном районе сохраняется; не указано — конец маршрута.
+    final withDrop = await driver.one(fn, args(d: dep.add(const Duration(minutes: 60)), x: 8200)) as String;
+    expect(await w.scalar('select drop_along from trips where id = @t::uuid', {'t': withDrop}), 8200);
+    expect(await w.scalar("select count(*)::int from trips where driver_id = @d::uuid and drop_along is null", {'d': driver.id}), 2);
+    // Точные места — дом в 1,3 км к северу от начала и двор в 1 км к западу от конца — сохраняются как есть.
+    final exact = await driver.one(fn, args(d: dep.add(const Duration(minutes: 90)), meet: (40.2381, 44.4930), drop: (40.1777, 44.5008))) as String;
+    expect(await w.scalar("select meet_lat || ',' || meet_lon || ' ' || drop_lat || ',' || drop_lon from trips where id = @t::uuid", {'t': exact}),
+        '40.2381,44.493 40.1777,44.5008');
   });
 
   test('бронь нельзя купить с нарушением правил', () async {

@@ -156,11 +156,12 @@ class Actor {
   Future<String> setPayoutCard([String number = '4111111111111111']) async =>
       await one('select driver_set_payout_card_sim(@n, @h)', {'n': number, 'h': name}) as String;
 
-  Future<String> createTrip(String routeId, DateTime departure, {int meet = 0, Map<String, int>? seats}) async {
+  /// Поставить рейс. [drop] — место высадки, метры от начала маршрута (null — конец маршрута).
+  Future<String> createTrip(String routeId, DateTime departure, {int meet = 0, int? drop, Map<String, int>? seats}) async {
     final list = (seats ?? {'front': 600, 'rl': 500, 'rr': 500}).entries.map((e) => {'id': e.key, 'price': e.value}).toList();
     return await one(
-      'select driver_create_trip(@r::uuid, @d::timestamptz, @m::int, @s::jsonb)',
-      {'r': routeId, 'd': departure.toUtc().toIso8601String(), 'm': '$meet', 's': jsonEncode(list)},
+      'select driver_create_trip(@r::uuid, @d::timestamptz, @m::int, @s::jsonb, @x::int)',
+      {'r': routeId, 'd': departure.toUtc().toIso8601String(), 'm': '$meet', 's': jsonEncode(list), 'x': drop?.toString()},
     ) as String;
   }
 
@@ -169,6 +170,15 @@ class Actor {
     _conn = null;
   }
 }
+
+/// Места легковой машины: переднее и два сзади (сзади — не больше двух пассажиров).
+const carSeats = ['front', 'rl', 'rr'];
+
+/// Только задние места — машина, где переднее место не продаётся.
+const rearSeats = ['rl', 'rr'];
+
+/// Список мест для параметра text[]: {front,rl,rr}.
+String seatsSql(List<String> seats) => '{${seats.join(',')}}';
 
 /// Тестовый мир: одна база, служебное подключение и набор виртуальных пользователей.
 class World {
@@ -219,11 +229,11 @@ class World {
     return a;
   }
 
-  /// Новый водитель с одобренной заявкой.
-  Future<Actor> newDriver(String name, {int seats = 4, bool approve = true}) async {
+  /// Новый водитель с одобренной заявкой. [seats] — какие места машины он продаёт (по умолчанию все три).
+  Future<Actor> newDriver(String name, {List<String> seats = carSeats, bool approve = true}) async {
     final a = await newUser(name);
-    await a.q('select apply_driver(@c, @k, @p, @s::int, @t)',
-        {'c': 'Toyota Camry', 'k': 'белая', 'p': '35 OO ${100 + _seq}', 's': '$seats', 't': '0${1000000 + _seq}'});
+    await a.q('select apply_driver(@c, @k, @p, @s::text[], @t)',
+        {'c': 'Toyota Camry', 'k': 'белая', 'p': '35 OO ${100 + _seq}', 's': seatsSql(seats), 't': '0${1000000 + _seq}'});
     await a.uploadDocuments();
     await a.setPayoutCard();
     if (approve) await verifier.q('select staff_review_driver(@d::uuid, true)', {'d': a.id});

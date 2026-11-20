@@ -30,7 +30,7 @@ const markSql = 'select driver_mark_boarding(@t::uuid, @s, @m)';
 const rateSql = 'select rate_booking(@b::uuid, @s::int)';
 const bookSql = 'select book_seats(@t::uuid, @s::text[], @c::uuid, @k)';
 const cancelSql = 'select cancel_booking(@b::uuid)';
-const applySql = 'select apply_driver(@c, @k, @p, @s::int, @t)';
+const applySql = 'select apply_driver(@c, @k, @p, @s::text[], @t)';
 const reviewSql = 'select staff_review_driver(@d::uuid, @a::boolean, @r)';
 const blockSql = 'select staff_block_user(@u::uuid, @b::boolean)';
 const routeStatusSql = 'select staff_set_route_status(@r::uuid, @s::route_status)';
@@ -40,8 +40,10 @@ const createSql = 'select driver_create_trip(@r::uuid, @d::timestamptz, @m::int,
 const refundSql = 'select staff_refund_booking(@b::uuid, @r)';
 const accrueSql = 'select accrue_due()';
 
-const seatOrder = ['front', 'rl', 'rr', 'rm'];
-const fourSeats = {'front': 600, 'rl': 500, 'rr': 500, 'rm': 400};
+const seatOrder = ['front', 'rl', 'rr'];
+const allSeats = {'front': 600, 'rl': 500, 'rr': 500};
+const rearPrices = {'rl': 500, 'rr': 500}; // рейс водителя, который продаёт только задние места
+const badSeats = ['front', 'rl', 'rr', 'rm']; // сзади трое — так нельзя
 const nobody = '00000000-0000-4000-8000-000000000000';
 
 /// Код ошибки самой базы (взаимная блокировка 40P01, нарушение уникальности 23505 и т. п.), а не отказ по правилам.
@@ -88,7 +90,7 @@ void main() {
 
   Future<DateTime> inMinutes(int m) async => (await w.now()).add(Duration(minutes: m));
 
-  Future<Actor> drv(String name, {int seats = 4, bool approve = true}) async {
+  Future<Actor> drv(String name, {List<String> seats = carSeats, bool approve = true}) async {
     final a = await w.newDriver(name, seats: seats, approve: approve);
     temp.add(a);
     return a;
@@ -127,8 +129,8 @@ void main() {
   }
 
   Map<String, Object?> bookArgs(Actor a, String trip, String seats) => {'t': trip, 's': seats, 'c': a.cardId, 'k': w.nextKey()};
-  Map<String, Object?> applyArgs(int seats, {String car = 'Kia Rio'}) =>
-      {'c': car, 'k': 'серая', 'p': '35 AA ${100 + Random().nextInt(900)}', 's': '$seats', 't': '01234567'};
+  Map<String, Object?> applyArgs(List<String> seats, {String car = 'Kia Rio'}) =>
+      {'c': car, 'k': 'серая', 'p': '35 AA ${100 + Random().nextInt(900)}', 's': seatsSql(seats), 't': '01234567'};
   Future<void> block(Actor a, bool on) => w.support.q(blockSql, {'u': a.id, 'b': '$on'});
 
   /// Переводит часы сервера на время отправления рейса (плюс секунда).
@@ -223,7 +225,7 @@ void main() {
 
     test('отметки посадки: рано, в окне до старта, неверная отметка, свободное место, снятие, после финиша', () async {
       final d = await drv('Л4');
-      final trip = await d.createTrip(route, await inMinutes(22), seats: fourSeats);
+      final trip = await d.createTrip(route, await inMinutes(22), seats: allSeats);
       final b = await sell(trip, [crowd[0], crowd[1]]);
       expect(await d.refusal(markSql, {'t': trip, 's': 'front', 'm': 'boarded'}), 'TOO_EARLY');
       await w.advance(const Duration(minutes: 6)); // ~16 минут
@@ -316,11 +318,11 @@ void main() {
       final d = await drv('Л8');
       final paid = crowd[0], early = crowd[1], late = crowd[2];
       final declined = await pas('Отказ банка', card: '4111111111110002');
-      final trip = await d.createTrip(route, await inMinutes(70), seats: fourSeats);
+      final trip = await d.createTrip(route, await inMinutes(70), seats: allSeats);
       final b = await sell(trip, [paid, early, late]);
-      final f = await declined.book(trip, ['rm']);
-      expect(f['status'], 'failed');
       expect((await early.cancel(b[1]))['refund'], 500, reason: 'за 70 минут — полный возврат');
+      final f = await declined.book(trip, ['rl']); // место освободилось, но банк отказал
+      expect(f['status'], 'failed');
       await w.advance(const Duration(minutes: 30));
       expect((await late.cancel(b[2]))['refund'], 0, reason: 'за 40 минут — без возврата');
       for (final x in [b[0], b[1], b[2], f['booking_id']]) {
@@ -423,17 +425,18 @@ void main() {
       await d.q(finishSql, {'t': b});
     });
 
-    test('покупка: 4 места одной бронью, пятое — нельзя; за 6 минут можно, за 4 — закрыто', () async {
+    test('покупка: все 3 места одной бронью, четвёртое — нельзя; за 6 минут можно, за 4 — закрыто', () async {
       final d = await drv('Л13');
       final d2 = await drv('Л13-2');
       final p = crowd[0], q = crowd[1];
-      final trip = await d.createTrip(route, await inMinutes(30), seats: fourSeats);
-      final trip2 = await d2.createTrip(route, await inMinutes(30), seats: fourSeats);
+      final trip = await d.createTrip(route, await inMinutes(30), seats: allSeats);
+      final trip2 = await d2.createTrip(route, await inMinutes(30), seats: allSeats);
       expect(await p.refusal(bookSql, bookArgs(p, trip, '{front,rl,rr,rm,front}')), 'BAD_SEATS');
-      final r = await p.book(trip, ['front', 'rl', 'rr', 'rm']);
+      expect(await p.refusal(bookSql, bookArgs(p, trip, '{front,rl,rr,rm}')), 'BAD_SEATS', reason: 'среднего места сзади нет');
+      final r = await p.book(trip, ['front', 'rl', 'rr']);
       expect(r['status'], 'paid');
-      expect(r['amount'], 2000);
-      expect(await q.refusal(bookSql, bookArgs(q, trip, '{rm}')), 'SEAT_TAKEN');
+      expect(r['amount'], 1600);
+      expect(await q.refusal(bookSql, bookArgs(q, trip, '{rr}')), 'SEAT_TAKEN');
       await w.advance(const Duration(minutes: 24)); // ~6 минут
       expect((await q.book(trip2, ['front']))['status'], 'paid');
       await w.advance(const Duration(minutes: 2)); // ~4 минуты
@@ -462,88 +465,91 @@ void main() {
       expect(await num('select count(*)::int from trip_seats where trip_id = @t::uuid and (booking_id is not null or boarding is not null)', {'t': trip}), 0);
     });
 
-    test('трёхместная машина: три места, среднего нет, все три одной бронью', () async {
-      final d = await drv('Л15', seats: 3);
+    test('машина, где водитель продаёт только задние места: переднее не выставить и не купить, среднего нет', () async {
+      final d = await drv('Л15', seats: rearSeats);
       final dep = (await inMinutes(60)).toUtc().toIso8601String();
-      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"front","price":600},{"id":"rl","price":500},{"id":"rm","price":400},{"id":"rr","price":500}]'}),
-          'BAD_SEATS');
-      final trip = await d.createTrip(route, await inMinutes(60));
-      expect(await num('select count(*)::int from trip_seats where trip_id = @t::uuid', {'t': trip}), 3);
+      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"front","price":600},{"id":"rl","price":500},{"id":"rr","price":500}]'}),
+          'BAD_SEATS', reason: 'переднее место в анкете не отмечено');
+      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"rl","price":500},{"id":"rm","price":400},{"id":"rr","price":500}]'}),
+          'BAD_SEATS', reason: 'сзади не больше двух пассажиров');
+      final trip = await d.createTrip(route, await inMinutes(60), seats: {'rl': 500, 'rr': 500});
+      expect(await num('select count(*)::int from trip_seats where trip_id = @t::uuid', {'t': trip}), 2);
       final p = crowd[0];
-      expect(await p.refusal(bookSql, bookArgs(p, trip, '{front,rl,rr,rm}')), 'BAD_SEATS');
-      final r = await p.book(trip, ['front', 'rl', 'rr']);
-      expect(r['amount'], 1600);
+      expect(await p.refusal(bookSql, bookArgs(p, trip, '{front}')), 'BAD_SEATS');
+      final r = await p.book(trip, ['rl', 'rr']);
+      expect(r['amount'], 1000);
       expect(await crowd[1].refusal(bookSql, bookArgs(crowd[1], trip, '{rm}')), 'BAD_SEATS');
       await d.q(cancelTripSql, {'t': trip});
     });
 
-    test('число мест в машине меняется между рейсами: старый рейс цел, новый — по новой машине', () async {
-      final d = await drv('Л16', seats: 4);
+    test('места в машине меняются между рейсами: старый рейс цел, новый — по новой анкете', () async {
+      final d = await drv('Л16', seats: carSeats);
       final p = crowd[0];
-      final t1 = await d.createTrip(route, await inMinutes(20), seats: fourSeats);
-      final r = await p.book(t1, ['rm']);
+      final t1 = await d.createTrip(route, await inMinutes(20), seats: allSeats);
+      final r = await p.book(t1, ['front']);
       await w.advance(const Duration(minutes: 6));
       await d.q(startSql, {'t': t1});
       await toDeparture(t1);
       await d.q(finishSql, {'t': t1});
-      expect(await d.refusal(applySql, applyArgs(3)), isNull, reason: 'рейсов впереди нет — машину менять можно');
+      expect(await d.refusal(applySql, applyArgs(rearSeats)), isNull, reason: 'рейсов впереди нет — анкету менять можно');
       expect(await w.scalar('select status::text from drivers where user_id = @d::uuid', {'d': d.id}), 'pending');
       final dep = (await inMinutes(60)).toUtc().toIso8601String();
-      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"front","price":600}]'}), 'DRIVER_NOT_APPROVED',
+      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"rl","price":500}]'}), 'DRIVER_NOT_APPROVED',
           reason: 'после повторной заявки нужен новый допуск');
       await w.verifier.q(reviewSql, {'d': d.id, 'a': 'true', 'r': null});
-      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"rm","price":400}]'}), 'BAD_SEATS');
-      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"front","price":600}]'}), isNull);
+      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"front","price":600}]'}), 'BAD_SEATS',
+          reason: 'переднее место больше не продаётся');
+      expect(await d.refusal(createSql, {'r': route, 'd': dep, 'm': '0', 's': '[{"id":"rl","price":500}]'}), isNull);
       expect(await bStatus(r['booking_id'] as String), 'done');
-      expect(await num("select count(*)::int from trip_seats where trip_id = @t::uuid and seat_id = 'rm'", {'t': t1}), 1);
-      expect(await p.refusal(rateSql, {'b': r['booking_id'], 's': '4'}), isNull, reason: 'оценка старой поездки после смены машины');
+      expect(await num("select count(*)::int from trip_seats where trip_id = @t::uuid and seat_id = 'front'", {'t': t1}), 1);
+      expect(await p.refusal(rateSql, {'b': r['booking_id'], 's': '4'}), isNull, reason: 'оценка старой поездки после смены анкеты');
     });
 
     test('менять машину нельзя, пока есть предстоящий или начатый рейс; после финиша и после отмены — можно', () async {
       final d = await drv('Л17');
       final t1 = await d.createTrip(route, await inMinutes(20));
       final t2 = await d.createTrip(route, await inMinutes(120));
-      expect(await d.refusal(applySql, applyArgs(3)), 'DRIVER_HAS_ACTIVE_TRIPS');
+      expect(await d.refusal(applySql, applyArgs(rearSeats)), 'DRIVER_HAS_ACTIVE_TRIPS');
       await w.advance(const Duration(minutes: 6));
       await d.q(startSql, {'t': t1});
       await d.q(cancelTripSql, {'t': t2});
-      expect(await d.refusal(applySql, applyArgs(3)), 'DRIVER_HAS_ACTIVE_TRIPS', reason: 'рейс идёт');
-      expect(await d.refusal(applySql, applyArgs(5)), 'BAD_SEATS_TOTAL');
-      expect(await d.refusal(applySql, {'c': ' ', 'k': 'серая', 'p': '35 AA 001', 's': '4', 't': '01234567'}), 'BAD_ARGUMENT');
+      expect(await d.refusal(applySql, applyArgs(rearSeats)), 'DRIVER_HAS_ACTIVE_TRIPS', reason: 'рейс идёт');
+      expect(await d.refusal(applySql, applyArgs(badSeats)), 'BAD_SEATS_TOTAL');
+      expect(await d.refusal(applySql, {'c': ' ', 'k': 'серая', 'p': '35 AA 001', 's': '{front,rl,rr}', 't': '01234567'}), 'BAD_ARGUMENT');
       await toDeparture(t1);
       await d.q(finishSql, {'t': t1});
-      expect(await d.refusal(applySql, applyArgs(3)), isNull);
-      expect(await num('select seats_total from drivers where user_id = @d::uuid', {'d': d.id}), 3);
+      expect(await d.refusal(applySql, applyArgs(rearSeats)), isNull);
+      expect(await num('select seats_total from drivers where user_id = @d::uuid', {'d': d.id}), 2);
     });
 
     test('водителю отказали в допуске во время рейса: начатый рейс идёт дальше, машину менять нельзя, пока он не завершён', () async {
       // ИСПРАВЛЕНО: раньше apply_driver запрещал менять анкету при рейсах только в статусе approved, а отказ в допуске
-      // оставлял проданные рейсы: отклонённый водитель подавал анкету с трёхместной машиной при проданном месте «rm».
+      // оставлял проданные рейсы: отклонённый водитель подавал анкету без места, которое уже было продано в рейсе.
       // ПРАВИЛО: отказ сразу отменяет не начатые рейсы с полным возвратом; начатый рейс идёт дальше, и пока у водителя
       // есть рейс, анкету менять нельзя (DRIVER_HAS_ACTIVE_TRIPS) — при любом его статусе.
-      final d = await drv('Л18', seats: 4);
+      final d = await drv('Л18', seats: carSeats);
       final p = crowd[0], q = crowd[1];
-      final running = await d.createTrip(route, await inMinutes(20), seats: fourSeats);
-      final later = await d.createTrip(route, await inMinutes(200), seats: fourSeats);
-      final rb = (await p.book(running, ['rm']))['booking_id'] as String;
-      final lb = (await q.book(later, ['rm']))['booking_id'] as String;
+      final running = await d.createTrip(route, await inMinutes(20), seats: allSeats);
+      final later = await d.createTrip(route, await inMinutes(200), seats: allSeats);
+      final rb = (await p.book(running, ['rr']))['booking_id'] as String;
+      final lb = (await q.book(later, ['rr']))['booking_id'] as String;
       await w.advance(const Duration(minutes: 6));
       await d.q(startSql, {'t': running});
       await w.verifier.q(reviewSql, {'d': d.id, 'a': 'false', 'r': 'документы просрочены'});
       expect(await tStatus(later), 'cancelled', reason: 'не начатый рейс отклонённого водителя отменён');
       expect(await bStatus(lb), 'cancelled');
-      expect(await refundOf(lb), 400);
+      expect(await refundOf(lb), 500);
       expect(await tStatus(running), 'started', reason: 'начатый рейс не трогаем: пассажиры уже едут');
       expect(await bStatus(rb), 'paid');
-      final second = await d.refusal(applySql, applyArgs(3, car: 'Daewoo Matiz'));
+      final second = await d.refusal(applySql, applyArgs(rearSeats, car: 'Daewoo Matiz'));
       expect(await violations(w), isEmpty, reason: 'после повторной заявки отклонённого водителя (ответ сервера: ${second ?? 'принято'})');
       expect(second, 'DRIVER_HAS_ACTIVE_TRIPS');
-      expect(await num('select seats_total from drivers where user_id = @d::uuid', {'d': d.id}), 4);
+      expect(await num('select seats_total from drivers where user_id = @d::uuid', {'d': d.id}), 3);
       await toDeparture(running);
       expect(await d.refusal(finishSql, {'t': running}), isNull, reason: 'начатый рейс водитель доводит до конца и без допуска');
       expect(await bStatus(rb), 'done');
-      expect(await d.refusal(applySql, applyArgs(3, car: 'Daewoo Matiz')), isNull, reason: 'рейсов не осталось — анкету менять можно');
-      expect(await w.scalar("select status::text || ' ' || seats_total from drivers where user_id = @d::uuid", {'d': d.id}), 'pending 3');
+      expect(await d.refusal(applySql, applyArgs(rearSeats, car: 'Daewoo Matiz')), isNull, reason: 'рейсов не осталось — анкету менять можно');
+      expect(await w.scalar("select status::text || ' ' || seats_total from drivers where user_id = @d::uuid", {'d': d.id}), 'pending 2');
     });
 
     test('водителю отказали в допуске: его не начатые рейсы сразу отменяются, деньги возвращаются полностью', () async {
@@ -603,7 +609,7 @@ void main() {
       expect(await d.refusal(markSql, {'t': trip, 's': 'front', 'm': 'boarded'}), 'BLOCKED');
       expect(await d.refusal(cancelTripSql, {'t': trip}), 'BLOCKED');
       expect(await d.refusal(finishSql, {'t': trip}), 'BLOCKED');
-      expect(await d.refusal(applySql, applyArgs(3)), 'BLOCKED');
+      expect(await d.refusal(applySql, applyArgs(rearSeats)), 'BLOCKED');
       expect(await d.refusal('select driver_earnings()'), 'BLOCKED');
       expect(await d.refusal('select * from trip_passengers(@t::uuid)', {'t': trip}), 'BLOCKED');
       expect(await d.refusal(createSql, {'r': route, 'd': (await inMinutes(300)).toUtc().toIso8601String(), 'm': '0', 's': '[{"id":"front","price":600}]'}),
@@ -928,7 +934,7 @@ void main() {
       final d = await drv('Л32');
       final d2 = await drv('Л32-2');
       final p = crowd[0];
-      final t1 = await d.createTrip(route, await inMinutes(200), seats: fourSeats);
+      final t1 = await d.createTrip(route, await inMinutes(200), seats: allSeats);
       final t2 = await d2.createTrip(route, await inMinutes(200));
       final key = 'flow-${w.nextKey()}';
       Future<String?> reuse(String trip, String seats) => p.refusal(bookSql, {'t': trip, 's': seats, 'c': p.cardId, 'k': key});
@@ -976,18 +982,18 @@ void main() {
 
     test('повторная заявка до проверки и повторное решение проверяющего', () async {
       final d = await drv('Л33', approve: false);
-      expect(await d.refusal(applySql, applyArgs(3, car: 'Вторая машина')), isNull);
+      expect(await d.refusal(applySql, applyArgs(rearSeats, car: 'Вторая машина')), isNull);
       expect(await w.verifier.refusal(reviewSql, {'d': d.id, 'a': 'false', 'r': ' '}), 'REASON_REQUIRED');
       expect(await w.verifier.refusal(reviewSql, {'d': nobody, 'a': 'true', 'r': null}), 'DRIVER_NOT_FOUND');
       expect(await d.refusal(reviewSql, {'d': d.id, 'a': 'true', 'r': null}), 'FORBIDDEN', reason: 'сам себя не одобришь');
       await w.verifier.q(reviewSql, {'d': d.id, 'a': 'false', 'r': 'нет фото'});
       expect(await d.refusal(createSql, {'r': route, 'd': (await inMinutes(60)).toUtc().toIso8601String(), 'm': '0', 's': '[{"id":"front","price":600}]'}),
           'DRIVER_NOT_APPROVED');
-      expect(await d.refusal(applySql, applyArgs(4, car: 'Третья машина')), isNull);
+      expect(await d.refusal(applySql, applyArgs(carSeats, car: 'Третья машина')), isNull);
       expect(await w.scalar('select status::text || coalesce(reject_reason, \'\') from drivers where user_id = @d::uuid', {'d': d.id}), 'pending');
       await w.verifier.q(reviewSql, {'d': d.id, 'a': 'true', 'r': null});
-      expect(await d.refusal(createSql, {'r': route, 'd': (await inMinutes(60)).toUtc().toIso8601String(), 'm': '0', 's': '[{"id":"rm","price":400}]'}),
-          isNull);
+      expect(await d.refusal(createSql, {'r': route, 'd': (await inMinutes(60)).toUtc().toIso8601String(), 'm': '0', 's': '[{"id":"front","price":600}]'}),
+          isNull, reason: 'в последней анкете переднее место снова отмечено');
     });
   });
 
@@ -1002,10 +1008,10 @@ void main() {
       final drivers = [for (var i = 0; i < n; i++) await drv('Старт $i')];
       for (var round = 0; round < 3; round++) {
         final dep = await inMinutes(20);
-        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         final bookings = <String>[];
         for (var i = 0; i < n; i++) {
-          bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+          bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
         }
         await w.advance(const Duration(minutes: 6)); // ~14 минут до отправления
         final actions = <(String, int, Future<Object?> Function())>[
@@ -1028,7 +1034,7 @@ void main() {
           }
         }
         expect(await num("select count(*)::int from trips where id = any(@t::uuid[]) and status = 'started'", {'t': '{${trips.join(',')}}'}), n);
-        expect(await num('select count(*)::int from trip_seats where trip_id = any(@t::uuid[]) and booking_id is not null', {'t': '{${trips.join(',')}}'}), n * 4,
+        expect(await num('select count(*)::int from trip_seats where trip_id = any(@t::uuid[]) and booking_id is not null', {'t': '{${trips.join(',')}}'}), n * 3,
             reason: 'поздняя отмена места не освобождает');
         // ПРАВИЛО: завершить рейс можно только с момента отправления — иначе у водителя остаётся начатый рейс
         // и следующий он начать не сможет (ANOTHER_TRIP_STARTED).
@@ -1047,7 +1053,7 @@ void main() {
       final drivers = [for (var i = 0; i < n; i++) await drv('Отмена $i')];
       final supportClone = clone(w.support);
       final dep = await inMinutes(200);
-      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
       final first = <String>[];
       for (var i = 0; i < n; i++) {
         first.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 2))); // front, rl
@@ -1060,7 +1066,7 @@ void main() {
           () => drivers[i].one(cancelTripSql, {'t': trips[i]}),
           () => crowd[i * 4 + 1].cancel(first[i * 2 + 1]),
           () => dClones[i].one(cancelTripSql, {'t': trips[i]}),
-          () => crowd[i * 4 + 3].book(trips[i], ['rm']),
+          () => crowd[i * 4 + 3].book(trips[i], ['front']), // только что освободившееся место
           if (i.isEven) () => supportClone.one(cancelTripSql, {'t': trips[i]}),
         ],
       ]);
@@ -1083,9 +1089,9 @@ void main() {
       const n = 8;
       final drivers = [for (var i = 0; i < n; i++) await drv('Финиш $i')];
       final dep = await inMinutes(20);
-      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
       for (var i = 0; i < n; i++) {
-        await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4));
+        await sell(trips[i], crowd.sublist(i * 4, i * 4 + 3));
       }
       await closeCrowd();
       await w.advance(const Duration(minutes: 6));
@@ -1098,7 +1104,7 @@ void main() {
           () => markers[i][1].q(markSql, {'t': trips[i], 's': 'rl', 'm': 'no_show'}),
           () => drivers[i].q(finishSql, {'t': trips[i]}),
           () => markers[i][2].q(markSql, {'t': trips[i], 's': 'rr', 'm': 'boarded'}),
-          () => markers[i][3].q(markSql, {'t': trips[i], 's': 'rm', 'm': 'boarded'}),
+          () => markers[i][3].q(markSql, {'t': trips[i], 's': 'rl', 'm': 'boarded'}),
           () => markers[i][4].q(markSql, {'t': trips[i], 's': 'front', 'm': null}),
         ],
       ]);
@@ -1107,14 +1113,14 @@ void main() {
       for (var i = 0; i < n; i++) {
         expect(res[i * 6 + 2], isNot(isA<Refused>()), reason: 'финиш начатого рейса проходит всегда');
         expect(await tStatus(trips[i]), 'finished');
-        expect(await num("select count(*)::int from bookings where trip_id = @t::uuid and status = 'done'", {'t': trips[i]}), 4);
+        expect(await num("select count(*)::int from bookings where trip_id = @t::uuid and status = 'done'", {'t': trips[i]}), 3);
       }
     });
 
     test('один рейс отменяют 20 подключений водителя сразу: отмена и возвраты — один раз', () async {
       final d = await drv('Двадцать отмен');
       for (var round = 0; round < 4; round++) {
-        final trip = await d.createTrip(route, await inMinutes(90), seats: fourSeats);
+        final trip = await d.createTrip(route, await inMinutes(90), seats: allSeats);
         final b = await sell(trip, crowd.sublist(round * 4, round * 4 + 3));
         await w.advance(const Duration(minutes: 40)); // ~50 минут: поздняя отмена без возврата
         expect((await crowd[round * 4].cancel(b[0]))['refund'], 0);
@@ -1223,15 +1229,15 @@ void main() {
       final rnd = Random(55);
       for (var round = 0; round < rounds; round++) {
         final r = await newRoute();
-        final trip = await d.createTrip(r, await inMinutes(200 + round), seats: fourSeats);
+        final trip = await d.createTrip(r, await inMinutes(200 + round), seats: allSeats);
         final buyers = (List.of(crowd)..shuffle(rnd)).take(24).toList();
         final res = await together([
-          for (var i = 0; i < 8; i++) () => buyers[i].book(trip, [seatOrder[i % 4]]),
+          for (var i = 0; i < 8; i++) () => buyers[i].book(trip, [seatOrder[i % 3]]),
           () => mods[0].q(routeStatusSql, {'r': r, 's': 'archived'}),
           () => d.one(cancelTripSql, {'t': trip}),
-          for (var i = 8; i < 16; i++) () => buyers[i].book(trip, [seatOrder[i % 4]]),
+          for (var i = 8; i < 16; i++) () => buyers[i].book(trip, [seatOrder[i % 3]]),
           () => mods[1].q(routeStatusSql, {'r': r, 's': 'archived'}),
-          for (var i = 16; i < 24; i++) () => buyers[i].book(trip, [seatOrder[i % 4]]),
+          for (var i = 16; i < 24; i++) () => buyers[i].book(trip, [seatOrder[i % 3]]),
           () => mods[2].q(routeStatusSql, {'r': r, 's': 'draft'}),
         ]);
         expect(dbErrors(res), isEmpty);
@@ -1242,10 +1248,10 @@ void main() {
     });
 
     test('пассажир покупает, а поддержка в тот же момент его блокирует', () async {
-      const n = 32;
+      const n = 30; // 10 рейсов по 3 места
       final d = await drv('Блок и покупка');
       final dep = await inMinutes(200);
-      final trips = [for (var i = 0; i < n ~/ 4; i++) await d.createTrip(route, dep.add(Duration(minutes: 25 * i)), seats: fourSeats)];
+      final trips = [for (var i = 0; i < n ~/ 3; i++) await d.createTrip(route, dep.add(Duration(minutes: 25 * i)), seats: allSeats)];
       final fresh = [for (var i = 0; i < n; i++) await pas('Под блок $i')];
       final sup = [for (var i = 0; i < n; i++) clone(w.support)];
       await Future.wait([for (final a in [...fresh, ...sup]) a.q('select 1')]); // подключения открыты заранее
@@ -1253,7 +1259,7 @@ void main() {
       final res = await together([
         for (var i = 0; i < n; i++) ...[
           () => sup[i].q(blockSql, {'u': fresh[i].id, 'b': 'true'}),
-          () => Future<void>.delayed(Duration(milliseconds: (i % 8) * 15)).then((_) => fresh[i].book(trips[i ~/ 4], [seatOrder[i % 4]])),
+          () => Future<void>.delayed(Duration(milliseconds: (i % 8) * 15)).then((_) => fresh[i].book(trips[i ~/ 3], [seatOrder[i % 3]])),
         ],
       ]);
       expect(dbErrors(res), isEmpty);
@@ -1266,7 +1272,7 @@ void main() {
           reason: 'у получивших отказ нет ни брони, ни списания');
       print('блокировка против покупки: успели купить $paid, отказано $refused');
       // После блокировки не проходит уже ничего.
-      final again = await together([for (var i = 0; i < n; i++) () => fresh[i].book(trips[i ~/ 4], [seatOrder[i % 4]])]);
+      final again = await together([for (var i = 0; i < n; i++) () => fresh[i].book(trips[i ~/ 3], [seatOrder[i % 3]])]);
       expect(again.whereType<Refused>().map((e) => e.code).toSet(), {'BLOCKED'});
       expect(again.whereType<Map>(), isEmpty);
       for (final t in trips) {
@@ -1279,7 +1285,7 @@ void main() {
       final drivers = [for (var i = 0; i < n; i++) await drv('Старт и покупка $i')];
       for (var round = 0; round < 3; round++) {
         final dep = await inMinutes(20);
-        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         await w.advance(const Duration(minutes: 6)); // ~14 минут: старт уже можно, продажа ещё открыта
         await Future.wait([for (final a in [...drivers, ...crowd.take(n * 4)]) a.q('select 1')]);
         // Функции «прогреты» заранее отказами, покупки разнесены на 0–3 мс вокруг старта: встречаются оба порядка.
@@ -1292,8 +1298,8 @@ void main() {
             () => crowd[i * 4].book(trips[i], ['front']),
             () => after(1, () => crowd[i * 4 + 1].book(trips[i], ['rl', 'rr'])),
             () => after(1 + i % 2, () => drivers[i].q(startSql, {'t': trips[i]})),
-            () => after(2, () => crowd[i * 4 + 2].book(trips[i], ['rm'])),
-            () => after(3, () => crowd[i * 4 + 3].book(trips[i], ['front', 'rm'])),
+            () => after(2, () => crowd[i * 4 + 2].book(trips[i], ['rr'])),
+            () => after(3, () => crowd[i * 4 + 3].book(trips[i], ['front', 'rr'])),
           ],
         ]);
         expect(dbErrors(res), isEmpty);
@@ -1320,7 +1326,7 @@ void main() {
       final drivers = [for (var i = 0; i < n; i++) await drv('Начисление $i')];
       // Вчерашние рейсы: завершены, ждут начисления.
       var dep = await inMinutes(20);
-      final old = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+      final old = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
       final oldBookings = <String>[];
       for (var i = 0; i < n; i++) {
         oldBookings.addAll(await sell(old[i], crowd.sublist(i * 4, i * 4 + 2)));
@@ -1332,8 +1338,8 @@ void main() {
       await w.advance(const Duration(hours: 25));
       // Сегодняшние: один в пути, один в продаже.
       dep = await inMinutes(20);
-      final running = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
-      final open = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 200)), seats: fourSeats)];
+      final running = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
+      final open = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 200)), seats: allSeats)];
       for (var i = 0; i < n; i++) {
         await sell(running[i], crowd.sublist(i * 4, i * 4 + 3));
       }
@@ -1376,7 +1382,7 @@ void main() {
       const n = 12;
       final drivers = [for (var i = 0; i < n; i++) await drv('Забытый $i')];
       final dep = await inMinutes(20);
-      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
       final bookings = <String>[];
       for (var i = 0; i < n; i++) {
         bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 2)));
@@ -1433,7 +1439,7 @@ void main() {
       await closeCrowd();
       final people = [for (var i = 0; i < 30; i++) await w.newUser('Заявка $i')];
       temp.addAll(people);
-      final res = await together([for (var i = 0; i < people.length; i++) () => people[i].q(applySql, applyArgs(i.isEven ? 4 : 3))]);
+      final res = await together([for (var i = 0; i < people.length; i++) () => people[i].q(applySql, applyArgs(i.isEven ? carSeats : rearSeats))]);
       expect(res.whereType<Refused>(), isEmpty);
       expect(await num("select count(*)::int from drivers where user_id = any(@u::uuid[]) and status = 'pending'", {'u': '{${people.map((p) => p.id).join(',')}}'}), 30);
       for (final p in people) {
@@ -1443,12 +1449,12 @@ void main() {
       final one = await w.newUser('Заявка с 15 телефонов');
       temp.add(one);
       final clones = [for (var i = 0; i < 15; i++) clone(one)];
-      final res2 = await together([for (var i = 0; i < clones.length; i++) () => clones[i].q(applySql, applyArgs(3 + i % 2, car: 'Машина $i'))]);
+      final res2 = await together([for (var i = 0; i < clones.length; i++) () => clones[i].q(applySql, applyArgs(i.isEven ? rearSeats : carSeats, car: 'Машина $i'))]);
       expect(res2.whereType<Refused>().map((e) => '${e.code} ${e.message}'), isEmpty);
       expect(await num('select count(*)::int from drivers where user_id = @u::uuid', {'u': one.id}), 1);
       final row = (await w.admin.execute("select car, seats_total, status::text from drivers where user_id = '${one.id}'")).first;
       final idx = int.parse((row[0] as String).split(' ').last);
-      expect(row[1], 3 + idx % 2, reason: 'в анкете машина и число мест из одной и той же заявки');
+      expect(row[1], idx.isEven ? 2 : 3, reason: 'в анкете машина и места из одной и той же заявки');
       expect(row[2], 'pending');
       for (final c in clones) {
         await c.close();
@@ -1458,13 +1464,13 @@ void main() {
       final busy = await drv('Занятой');
       final trip = await busy.createTrip(route, await inMinutes(100));
       final bc = [for (var i = 0; i < 15; i++) clone(busy)];
-      final res3 = await together([for (final c in bc) () => c.q(applySql, applyArgs(3))]);
+      final res3 = await together([for (final c in bc) () => c.q(applySql, applyArgs(rearSeats))]);
       expect(res3.whereType<Refused>().map((e) => e.code).toList(), List.filled(15, 'DRIVER_HAS_ACTIVE_TRIPS'));
       await busy.q(cancelTripSql, {'t': trip});
     });
 
     test('новая анкета и постановка рейса одного водителя в один момент: проходит только одно', () async {
-      final d = await drv('Анкета или рейс', seats: 4);
+      final d = await drv('Анкета или рейс', seats: carSeats);
       final a = clone(d), b = clone(d);
       var applyWon = 0, tripWon = 0;
       for (var round = 0; round < 24; round++) {
@@ -1472,8 +1478,8 @@ void main() {
         await Future.wait([a.q('select 1'), b.q('select 1')]);
         // То анкета, то рейс стартуют на пару миллисекунд позже: так встречаются оба порядка.
         final res = await together([
-          () => Future<void>.delayed(Duration(milliseconds: round % 4 == 1 ? 2 : 0)).then((_) => a.q(applySql, applyArgs(3))),
-          () => Future<void>.delayed(Duration(milliseconds: round % 4 >= 2 ? round % 4 : 0)).then((_) => b.createTrip(route, dep, seats: {'rm': 400})),
+          () => Future<void>.delayed(Duration(milliseconds: round % 4 == 1 ? 2 : 0)).then((_) => a.q(applySql, applyArgs(rearSeats))),
+          () => Future<void>.delayed(Duration(milliseconds: round % 4 >= 2 ? round % 4 : 0)).then((_) => b.createTrip(route, dep, seats: {'front': 600})),
         ]);
         expect(dbErrors(res), isEmpty);
         final applyRes = res[0], tripRes = res[1];
@@ -1485,7 +1491,7 @@ void main() {
           applyWon++;
           expect(applyRes, isNot(isA<Refused>()));
           expect((tripRes as Refused).code, 'DRIVER_NOT_APPROVED');
-          await d.q(applySql, applyArgs(4));
+          await d.q(applySql, applyArgs(carSeats));
           await w.verifier.q(reviewSql, {'d': d.id, 'a': 'true', 'r': null});
         }
         expect(await violations(w), isEmpty, reason: 'круг $round');
@@ -1498,13 +1504,13 @@ void main() {
       await closeCrowd();
       const n = 30;
       final r = await newRoute();
-      final drivers = [for (var i = 0; i < n; i++) await drv('Тридцать $i', seats: i.isEven ? 4 : 3)];
+      final drivers = [for (var i = 0; i < n; i++) await drv('Тридцать $i', seats: i.isEven ? carSeats : rearSeats)];
       final twins = [for (final d in drivers) clone(d)];
       final dep = await inMinutes(120);
       final res = await together([
         for (var i = 0; i < n; i++) ...[
-          () => drivers[i].createTrip(r, dep, meet: i * 50),
-          () => twins[i].createTrip(r, dep.add(const Duration(minutes: 10)), meet: i * 50),
+          () => drivers[i].createTrip(r, dep, meet: i * 50, seats: i.isEven ? allSeats : rearPrices),
+          () => twins[i].createTrip(r, dep.add(const Duration(minutes: 10)), meet: i * 50, seats: i.isEven ? allSeats : rearPrices),
         ],
       ]);
       expect(dbErrors(res), isEmpty);
@@ -1541,17 +1547,17 @@ void main() {
       }
     });
 
-    test('39 пассажиров одновременно оценивают одного водителя: рейтинг равен среднему', () async {
+    test('38 пассажиров одновременно оценивают одного водителя: рейтинг равен среднему', () async {
       // ИСПРАВЛЕНО: раньше в rate_booking терялись обновления — среднее и число оценок считались по «снимку» на начало
       // оператора UPDATE drivers, и одновременные оценки записывали итог без оценок, зафиксированных за время ожидания.
       // ПРАВИЛО: оценки одного водителя считаются по очереди (блокировка строки водителя); рейтинг всегда равен среднему.
-      const tripsCount = 10;
+      const tripsCount = 13; // 13 рейсов по 3 места — 39 броней
       final d = await drv('Рейтинг');
       final dep = await inMinutes(20);
-      final trips = [for (var i = 0; i < tripsCount; i++) await d.createTrip(route, dep.add(Duration(minutes: 25 * i)), seats: fourSeats)];
+      final trips = [for (var i = 0; i < tripsCount; i++) await d.createTrip(route, dep.add(Duration(minutes: 25 * i)), seats: allSeats)];
       final bookings = <String>[];
       for (var i = 0; i < tripsCount; i++) {
-        bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+        bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
       }
       // Десять рейсов встык проходят по одному: начать можно только в окне старта, завершить — с момента отправления,
       // и у водителя не больше одного начатого рейса.
@@ -1562,12 +1568,12 @@ void main() {
       }
       // Последняя оценка ставится отдельно: она пересчитывает рейтинг заново, чтобы расхождение (если оно вернётся)
       // не роняло следующие проверки.
-      addTearDown(() => crowd[39].q(rateSql, {'b': bookings[39], 's': '5'}));
+      addTearDown(() => crowd[38].q(rateSql, {'b': bookings[38], 's': '5'}));
       // Оценки идут волнами по 8: карточка водителя сверяется после каждой волны, потому что следующая волна
       // может случайно «починить» расхождение (каждая оценка пересчитывает рейтинг целиком).
       final wrong = <String>[];
-      for (var from = 0; from < 39; from += 8) {
-        final res = await together([for (var i = from; i < min(from + 8, 39); i++) () => crowd[i].q(rateSql, {'b': bookings[i], 's': '${1 + i % 5}'})]);
+      for (var from = 0; from < 38; from += 8) {
+        final res = await together([for (var i = from; i < min(from + 8, 38); i++) () => crowd[i].q(rateSql, {'b': bookings[i], 's': '${1 + i % 5}'})]);
         expect(dbErrors(res), isEmpty);
         expect(res.whereType<Refused>(), isEmpty);
         final row = (await w.admin.execute('''select d.rating_count, d.rating::text,
@@ -1590,20 +1596,20 @@ void main() {
       // бронь (for update). Начисление, вставляя строку в журнал денег, берёт через внешние ключи сначала бронь
       // (key share), затем водителя (key share) — в обратном порядке. Отдельно от остальных действий эта пара
       // воспроизводится в проверке «начисление по рейсу и оценки его пассажиров в один момент».
-      const tripsCount = 9;
+      const tripsCount = 12; // 12 рейсов по 3 места — 36 броней
       final d = await drv('Узел блокировок');
       final dep = await inMinutes(20);
-      final trips = [for (var i = 0; i < tripsCount; i++) await d.createTrip(route, dep.add(Duration(minutes: 25 * i)), seats: fourSeats)];
+      final trips = [for (var i = 0; i < tripsCount; i++) await d.createTrip(route, dep.add(Duration(minutes: 25 * i)), seats: allSeats)];
       final bookings = <String>[];
       for (var i = 0; i < tripsCount; i++) {
-        bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+        bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
       }
       for (final t in trips) {
         await toDeparture(t); // рейсы встык проходят по одному: окно старта, финиш не раньше отправления
         await d.q(startSql, {'t': t});
         await d.q(finishSql, {'t': t});
       }
-      await w.advance(const Duration(hours: 25)); // по всем девяти рейсам пора начислять
+      await w.advance(const Duration(hours: 25)); // по всем рейсам пора начислять
       final fin = [for (var i = 0; i < 6; i++) clone(w.finance)];
       final dc = [for (var i = 0; i < 6; i++) clone(d)];
       final later = await inMinutes(120);
@@ -1611,7 +1617,7 @@ void main() {
         for (var i = 0; i < 35; i++) () => after(i % 6, () => crowd[i].q(rateSql, {'b': bookings[i], 's': '${1 + i % 5}'})),
         for (var i = 0; i < 6; i++) () => after(i, () => fin[i].one('select accrue_due()')),
         for (var i = 0; i < 4; i++) () => after(i, () => dc[i].createTrip(route, later.add(Duration(minutes: 30 * i)))),
-        () => after(2, () => dc[4].q(applySql, applyArgs(4))),
+        () => after(2, () => dc[4].q(applySql, applyArgs(carSeats))),
         () => after(3, () => dc[5].one('select driver_earnings()')),
         () => after(1, () => w.finance.one('select finance_create_payouts()')),
         () => after(4, () => w.verifier.q(reviewSql, {'d': d.id, 'a': 'true', 'r': null})),
@@ -1626,7 +1632,7 @@ void main() {
       expect(dbErrors(res), isEmpty);
       expect(res.whereType<Refused>().map((e) => e.code).toSet().difference({'DRIVER_HAS_ACTIVE_TRIPS', 'DRIVER_NOT_APPROVED'}), isEmpty);
       expect(await num("select count(*)::int from trips where id = any(@t::uuid[]) and accrued_at is not null", {'t': '{${trips.join(',')}}'}), tripsCount);
-      expect(await num("select count(*)::int from ledger where trip_id = any(@t::uuid[]) and kind = 'driver_accrual'", {'t': '{${trips.join(',')}}'}), tripsCount * 4,
+      expect(await num("select count(*)::int from ledger where trip_id = any(@t::uuid[]) and kind = 'driver_accrual'", {'t': '{${trips.join(',')}}'}), tripsCount * 3,
           reason: 'по каждой брони начислено один раз');
       expect(await num('select count(*)::int from bookings where id = any(@b::uuid[]) and rating is not null', {'b': '{${bookings.join(',')}}'}), 36);
       expect(ratingOff, 0, reason: 'рейтинг сразу после 35 одновременных оценок равен среднему');
@@ -1671,10 +1677,10 @@ void main() {
       const n = 5;
       final drivers = [for (var i = 0; i < n; i++) await drv('Тройная отмена $i')];
       final dep = await inMinutes(200);
-      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+      final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
       final bookings = <String>[];
       for (var i = 0; i < n; i++) {
-        bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+        bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
       }
       final twins = [for (var j = 0; j < bookings.length; j++) clone(crowd[j])];
       final sup = [for (var i = 0; i < 4; i++) clone(w.support)];
@@ -1728,10 +1734,10 @@ void main() {
         final d = await drv('Версия анкеты $round', approve: false);
         final ver = clone(w.verifier);
         await Future.wait([d.q('select 1'), ver.q('select 1')]);
-        await together([() => ver.q(reviewSql, {'d': nobody, 'a': 'true', 'r': null}), () => d.q(applySql, applyArgs(4))]); // прогрев
+        await together([() => ver.q(reviewSql, {'d': nobody, 'a': 'true', 'r': null}), () => d.q(applySql, applyArgs(carSeats))]); // прогрев
         final res = await together([
           () => Future<void>.delayed(Duration(milliseconds: round.isEven ? round % 3 : 0)).then((_) => ver.q(reviewSql, {'d': d.id, 'a': 'true', 'r': null})),
-          () => Future<void>.delayed(Duration(milliseconds: round.isOdd ? 1 + round % 3 : 0)).then((_) => d.q(applySql, applyArgs(3, car: 'Не та машина'))),
+          () => Future<void>.delayed(Duration(milliseconds: round.isOdd ? 1 + round % 3 : 0)).then((_) => d.q(applySql, applyArgs(rearSeats, car: 'Не та машина'))),
         ]);
         await ver.close();
         expect(res.whereType<Refused>(), isEmpty);
@@ -1756,8 +1762,8 @@ void main() {
       final r = await newRoute();
       final d = await drv('Кривой рейс');
       final got = <String, String?>{
-        'анкета: 5 мест': await u.refusal(applySql, applyArgs(5)),
-        'анкета: пустая машина': await u.refusal(applySql, {'c': '  ', 'k': 'серая', 'p': '35 AA 001', 's': '4', 't': '01234567'}),
+        'анкета: 5 мест': await u.refusal(applySql, applyArgs(badSeats)),
+        'анкета: пустая машина': await u.refusal(applySql, {'c': '  ', 'k': 'серая', 'p': '35 AA 001', 's': '{front,rl,rr}', 't': '01234567'}),
         'маршрут: код уже занят': await w.moderator.refusal(saveRouteSql, {'id': null, 'code': 'M1', 'fn': 'А', 'tn': 'Б', 'p': '500', 'm': '25', 'l': '9000'}),
         'маршрут: цена 0': await w.moderator.refusal(saveRouteSql, {'id': r, 'code': 'F$routeSeq', 'fn': 'А', 'tn': 'Б', 'p': '0', 'm': '25', 'l': '9000'}),
         'рейс: место не объект': await d.refusal(createSql, {'r': r, 'd': (await inMinutes(60)).toUtc().toIso8601String(), 'm': '0', 's': '["front"]'}),
@@ -1773,7 +1779,7 @@ void main() {
 
     test('допуск отзывают и возвращают, пока водитель ставит рейсы и подаёт анкеты', () async {
       // Гонки заявка × проверка × рейс: ошибок базы нет, рейс ставится только одобренным водителем с его машиной.
-      final d = await drv('Карусель допуска', seats: 4);
+      final d = await drv('Карусель допуска', seats: carSeats);
       final ver = [clone(w.verifier), clone(w.verifier)];
       final dc = [for (var i = 0; i < 4; i++) clone(d)];
       final all = <Object?>[];
@@ -1782,7 +1788,7 @@ void main() {
         final res = await together([
           () => ver[0].q(reviewSql, {'d': d.id, 'a': 'true', 'r': null}),
           () => dc[0].createTrip(route, dep.add(Duration(minutes: 30 * round)), seats: {'front': 600}),
-          () => dc[1].q(applySql, applyArgs(4)),
+          () => dc[1].q(applySql, applyArgs(carSeats)),
           () => ver[1].q(reviewSql, {'d': d.id, 'a': 'true', 'r': null}),
           () => dc[2].createTrip(route, dep.add(Duration(minutes: 30 * round + 5)), seats: {'rl': 500}),
           () => dc[3].one(cancelTripSql, {'t': nobody}),
@@ -1809,8 +1815,8 @@ void main() {
       var inTime = 0, tooLate = 0;
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(200);
-        final a = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
-        final b = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 30)), seats: fourSeats)];
+        final a = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
+        final b = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 30)), seats: allSeats)];
         final first = [for (var i = 0; i < n; i++) await sell(a[i], [crowd[i * 8], crowd[i * 8 + 1]])]; // front, rl
         await Future.wait([for (final x in [...sup, ...crowd]) x.q('select 1')]); // подключения открыты заранее
         final res = await together([
@@ -1818,10 +1824,10 @@ void main() {
             () => crowd[i * 8 + 2].book(a[i], ['rr']),
             () => crowd[i * 8].cancel(first[i][0]), // ранняя отмена: возврат и место снова в продаже
             () => after((i + round) % 4, () => sup[i].q(blockSql, {'u': drivers[i].id, 'b': 'true'})),
-            () => after(1, () => crowd[i * 8 + 3].book(a[i], ['rm'])),
+            () => after(1, () => crowd[i * 8 + 3].book(a[i], ['front'])),
             () => after(1, () => crowd[i * 8 + 4].book(b[i], ['front', 'rl'])),
             () => after(2, () => crowd[i * 8 + 5].book(b[i], ['rr'])),
-            () => after(3, () => crowd[i * 8 + 6].book(b[i], ['rm'])),
+            () => after(3, () => crowd[i * 8 + 6].book(b[i], ['rl'])),
             () => after(4, () => crowd[i * 8 + 7].book(a[i], ['front'])),
           ],
         ]);
@@ -1913,8 +1919,8 @@ void main() {
       var startWon = 0, rejectWon = 0, createdThenCancelled = 0;
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(20);
-        final now = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
-        final later = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 200)), seats: fourSeats)];
+        final now = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
+        final later = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 200)), seats: allSeats)];
         for (var i = 0; i < n; i++) {
           await sell(now[i], [crowd[i * 4], crowd[i * 4 + 1]]);
           await sell(later[i], [crowd[i * 4 + 2], crowd[i * 4 + 3]]);
@@ -1982,8 +1988,8 @@ void main() {
       var firstWon = 0, secondWon = 0;
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(20);
-        final a = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
-        final b = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 25)), seats: fourSeats)]; // встык
+        final a = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
+        final b = [for (final d in drivers) await d.createTrip(route, dep.add(const Duration(minutes: 25)), seats: allSeats)]; // встык
         for (var i = 0; i < n; i++) {
           await sell(a[i], [crowd[i * 4], crowd[i * 4 + 1]]);
           await sell(b[i], [crowd[i * 4 + 2], crowd[i * 4 + 3]]);
@@ -2034,15 +2040,15 @@ void main() {
       var refunded = 0, accrued = 0;
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(20);
-        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         final bookings = <String>[];
         for (var i = 0; i < n; i++) {
-          bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+          bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
         }
         await w.advance(const Duration(minutes: 6));
         // Одна бронь на рейс отменена поздно, без возврата: её деньги тоже либо возвращаются, либо распределяются.
         for (var i = 0; i < n; i++) {
-          expect((await crowd[i * 4 + 3].cancel(bookings[i * 4 + 3]))['refund'], 0);
+          expect((await crowd[i * 3 + 2].cancel(bookings[i * 3 + 2]))['refund'], 0);
         }
         await Future.wait([for (var i = 0; i < n; i++) drivers[i].q(startSql, {'t': trips[i]})]);
         await toDeparture(trips.first);
@@ -2058,7 +2064,7 @@ void main() {
         await w.finance.one(accrueSql);
         expect(await num('select count(*)::int from trips where id = any(@t::uuid[]) and accrued_at is null', {'t': ids(trips)}), 0);
         for (var j = 0; j < bookings.length; j++) {
-          final amount = fourSeats[seatOrder[j % 4]]!;
+          final amount = allSeats[seatOrder[j % 3]]!;
           final state = await w.scalar('''
               select b.refund || ' / ' || b.status || ' / распределено '
                 || (select coalesce(sum(l.amount), 0) from ledger l where l.booking_id = b.id and l.kind in ('driver_accrual', 'commission', 'state_duty'))
@@ -2068,7 +2074,7 @@ void main() {
           final r = res[j];
           if (r is Refused) {
             accrued++;
-            expect(state, '0 / ${j % 4 == 3 ? 'cancelled' : 'done'} / распределено $amount / возвратов 0 / записей о возврате 0', reason: 'бронь $j: отказ ${r.code}');
+            expect(state, '0 / ${j % 3 == 2 ? 'cancelled' : 'done'} / распределено $amount / возвратов 0 / записей о возврате 0', reason: 'бронь $j: отказ ${r.code}');
           } else {
             refunded++;
             expect(r, amount, reason: 'возвращена вся сумма брони');
@@ -2092,26 +2098,26 @@ void main() {
       final sup = [clone(w.support), clone(w.support)];
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(20);
-        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         final bookings = <String>[];
         for (var i = 0; i < n; i++) {
-          bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+          bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 3)));
         }
         await w.advance(const Duration(minutes: 6));
         for (var i = 0; i < n; i++) {
-          expect((await crowd[i * 4 + 3].cancel(bookings[i * 4 + 3]))['refund'], 0, reason: 'за 14 минут — без возврата');
+          expect((await crowd[i * 4 + 2].cancel(bookings[i * 3 + 2]))['refund'], 0, reason: 'за 14 минут — без возврата');
         }
         await w.advance(const Duration(hours: 3)); // конец по расписанию + 2 часа прошли
         await Future.wait([for (final x in [...crowd, ...drivers, ...twins, ...fin, ...sup]) x.q('select 1')]);
         final res = await together([
           for (var i = 0; i < n; i++) ...[
             () => i % 3 == 0 ? after(round, () => fin[i ~/ 3].one(accrueSql)) : Future.value(),
-            () => crowd[i * 4].cancel(bookings[i * 4]),
+            () => crowd[i * 4].cancel(bookings[i * 3]),
             () => i.isEven ? after(1, () => drivers[i].one(cancelTripSql, {'t': trips[i]})) : Future.value(),
-            () => after(1, () => crowd[i * 4 + 1].cancel(bookings[i * 4 + 1])),
+            () => after(1, () => crowd[i * 4 + 1].cancel(bookings[i * 3 + 1])),
             () => i % 4 == 1 ? sup[(i ~/ 4) % 2].one(cancelTripSql, {'t': trips[i]}) : Future.value(),
             () => after(2, () => twins[i].q(startSql, {'t': trips[i]})),
-            () => after(2, () => crowd[i * 4 + 2].cancel(bookings[i * 4 + 2])),
+            () => after(2, () => crowd[i * 4 + 2].cancel(bookings[i * 3 + 2])),
           ],
         ]);
         expect(dbErrors(res), isEmpty);
@@ -2126,7 +2132,7 @@ void main() {
           expect(await num("select count(*)::int from audit_log where action = 'cancel_trip' and entity_id = @t", {'t': trips[i]}), 1, reason: 'рейс отменён ровно один раз');
         }
         expect(await notRefundedOnce(trips), 0, reason: 'каждой брони — один полный возврат');
-        expect(await num('select count(*)::int from bookings where trip_id = any(@t::uuid[])', {'t': ids(trips)}), n * 4);
+        expect(await num('select count(*)::int from bookings where trip_id = any(@t::uuid[])', {'t': ids(trips)}), n * 3);
         expect(await heldSeats(trips), 0);
         expect(await moneyKept(trips), 0);
         expect(await violations(w), isEmpty, reason: 'круг $round');
@@ -2196,12 +2202,12 @@ void main() {
       final sup = [for (var i = 0; i < 16; i++) clone(w.support)];
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(200);
-        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final trips = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         final bookings = <String>[];
         for (var i = 0; i < n; i++) {
-          bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+          bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
         }
-        await Future.wait([for (final x in [...sup, ...drivers, ...crowd.take(n * 4)]) x.q('select 1')]);
+        await Future.wait([for (final x in [...sup, ...drivers, ...crowd.take(n * 3)]) x.q('select 1')]);
         final res = await together([
           for (var j = 0; j < bookings.length; j++) ...[
             () => sup[(j * 2) % 16].one(refundSql, {'b': bookings[j], 'r': 'жалоба'}),
@@ -2215,7 +2221,7 @@ void main() {
         for (var j = 0; j < bookings.length; j++) {
           final accepted = [res[j * 3], res[j * 3 + 1]].where((r) => r is! Refused).toList();
           expect(accepted.length, lessThanOrEqualTo(1), reason: 'бронь $j: возврат поддержкой принят дважды');
-          expect(accepted, everyElement(fourSeats[seatOrder[j % 4]]), reason: 'возвращается вся сумма брони');
+          expect(accepted, everyElement(allSeats[seatOrder[j % 3]]), reason: 'возвращается вся сумма брони');
           expect(await num("select count(*)::int from audit_log where action = 'refund_booking' and entity_id = @b", {'b': bookings[j]}), accepted.length);
         }
         expect(await notRefundedOnce(trips), 0, reason: 'каждой брони — один полный возврат');
@@ -2230,7 +2236,7 @@ void main() {
         expect(await w.finance.refusal(refundSql, {'b': bookings[0], 'r': 'финансист'}), 'FORBIDDEN');
         expect(await notRefundedOnce(trips), 0);
         // На не отменённых рейсах места после возврата снова продаются.
-        expect((await crowd[0].book(trips[0], ['front', 'rl', 'rr', 'rm']))['status'], 'paid');
+        expect((await crowd[0].book(trips[0], ['front', 'rl', 'rr']))['status'], 'paid');
         expect(await violations(w), isEmpty, reason: 'круг $round');
         for (var i = 0; i < n; i += 2) {
           await drivers[i].q(cancelTripSql, {'t': trips[i]});
@@ -2242,7 +2248,7 @@ void main() {
       // Порядок блокировок на сервере — водитель → маршрут → рейс → бронь. Оценка берёт строку водителя, затем бронь;
       // начисление держит рейс и пишет в журнал денег строки со ссылками на бронь и на водителя. Ни одна сторона
       // не должна получить ошибку базы 40P01 (взаимная блокировка): ни пассажир, ни начисление по расписанию.
-      // Здесь только эти два действия: у двух водителей по шесть рейсов встык, все 48 пассажиров оценивают поездку
+      // Здесь только эти два действия: у двух водителей по шесть рейсов встык, 36 пассажиров оценивают поездку
       // в тот момент, когда по этим рейсам идёт начисление.
       // ИСПРАВЛЕНО (раньше было так): взаимная блокировка accrue_due × rate_booking. Начисление вставляет строку журнала по первой брони
       // водителя: внешний ключ берёт бронь (key share), затем ждёт строку водителя, занятую очередью оценок. Оценка этой
@@ -2254,12 +2260,12 @@ void main() {
       for (var round = 0; round < rounds; round++) {
         final dep = await inMinutes(20);
         final byDriver = [
-          for (final d in drivers) [for (var k = 0; k < perDriver; k++) await d.createTrip(route, dep.add(Duration(minutes: 25 * k)), seats: fourSeats)],
+          for (final d in drivers) [for (var k = 0; k < perDriver; k++) await d.createTrip(route, dep.add(Duration(minutes: 25 * k)), seats: allSeats)],
         ];
         final trips = byDriver.expand((t) => t).toList();
         final bookings = <String>[];
         for (var i = 0; i < trips.length; i++) {
-          bookings.addAll(await sell(trips[i], crowd.sublist(i * 4, i * 4 + 4)));
+          bookings.addAll(await sell(trips[i], crowd.sublist(i * 3, i * 3 + 3)));
         }
         for (var k = 0; k < perDriver; k++) {
           await toDeparture(byDriver[0][k]); // рейсы встык проходят по одному
@@ -2302,7 +2308,7 @@ void main() {
       final ver = [for (var i = 0; i < 5; i++) clone(w.verifier)];
       for (var round = 0; round < rounds; round++) {
         var dep = await inMinutes(20);
-        final old = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final old = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         for (var i = 0; i < n; i++) {
           await sell(old[i], [crowd[i * 4], crowd[i * 4 + 1]]);
         }
@@ -2312,7 +2318,7 @@ void main() {
         await Future.wait([for (var i = 0; i < n; i++) drivers[i].q(finishSql, {'t': old[i]})]);
         await w.advance(const Duration(hours: 22));
         dep = await inMinutes(20);
-        final stale = [for (final d in drivers) await d.createTrip(route, dep, seats: fourSeats)];
+        final stale = [for (final d in drivers) await d.createTrip(route, dep, seats: allSeats)];
         for (var i = 0; i < n; i++) {
           await sell(stale[i], [crowd[i * 4 + 2], crowd[i * 4 + 3]]);
         }
@@ -2355,7 +2361,7 @@ void main() {
       await closeCrowd();
       final routes = [for (var i = 0; i < 3; i++) await newRoute(price: 400 + 100 * i, minutes: 15 + 10 * i, length: 4000 + 1000 * i)];
       final codes = [for (var i = 0; i < 3; i++) 'F${routeSeq - 2 + i}'];
-      final drivers = [for (var i = 0; i < 8; i++) await drv('Шторм-водитель $i', seats: i.isEven ? 4 : 3)];
+      final drivers = [for (var i = 0; i < 8; i++) await drv('Шторм-водитель $i', seats: i.isEven ? carSeats : rearSeats)];
       final dTwins = [for (final d in drivers) clone(d)];
       final passengers = crowd.sublist(0, 28);
       final staff = {
@@ -2382,7 +2388,7 @@ void main() {
         if (dice < 14) {
           final i = rnd.nextInt(drivers.length);
           final d = rnd.nextBool() ? drivers[i] : dTwins[i];
-          final all = ['front', 'rl', 'rr', if (i.isEven) 'rm']..shuffle(rnd);
+          final all = ['front', 'rl', 'rr', if (rnd.nextInt(20) == 0) 'rm']..shuffle(rnd); // изредка — несуществующее среднее место
           final seats = {for (final s in all.take(1 + rnd.nextInt(all.length))) s: 100 * (2 + rnd.nextInt(6))};
           // Половина рейсов — на ближайшие полчаса-час: начать рейс можно только за 15 минут до отправления, а завершить —
           // с момента отправления, и далёкие рейсы до этого в шторме почти не доживают (их отменяют раньше).
@@ -2392,7 +2398,7 @@ void main() {
           final trips = await w.admin.execute("select id::text from trips where status = 'planned' and route_id = any('{${routes.join(',')}}'::uuid[]) order by random() limit 4");
           if (trips.isEmpty) return;
           final p = pick(passengers);
-          final seats = (['front', 'rl', 'rm', 'rr']..shuffle(rnd)).take(1 + rnd.nextInt(2)).toList();
+          final seats = (['front', 'rl', 'rr', if (rnd.nextInt(20) == 0) 'rm']..shuffle(rnd)).take(1 + rnd.nextInt(2)).toList();
           await act('бронь', () => p.book(pick(trips).first as String, seats));
         } else if (dice < 56) {
           final rows = await w.admin.execute(
@@ -2429,7 +2435,7 @@ void main() {
           }
         } else if (dice < 79) {
           final i = rnd.nextInt(drivers.length);
-          await act('анкета', () => dTwins[i].q(applySql, applyArgs(i.isEven ? 4 : 3)));
+          await act('анкета', () => dTwins[i].q(applySql, applyArgs(i.isEven ? carSeats : rearSeats)));
         } else if (dice < 85) {
           await act('допуск', () => staff['ver']!.first.q(reviewSql, {'d': pick(drivers).id, 'a': 'true', 'r': null}));
         } else if (dice < 91) {

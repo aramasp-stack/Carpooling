@@ -24,7 +24,7 @@ void main() {
   /// Водитель, который только подал анкету (без документов, карты и одобрения).
   Future<Actor> applicant(String name) async {
     final a = await w.newUser(name);
-    await a.q('select apply_driver(@c, @k, @p, 4, @t)', {'c': 'Kia Rio', 'k': 'серая', 'p': '11 AA 111', 't': '0123'});
+    await a.q("select apply_driver(@c, @k, @p, '{front,rl,rr}', @t)", {'c': 'Kia Rio', 'k': 'серая', 'p': '11 AA 111', 't': '0123'});
     return a;
   }
 

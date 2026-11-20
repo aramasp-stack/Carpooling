@@ -22,7 +22,7 @@ final cleanCode = matches(RegExp(r'^[A-Z][A-Z0-9_]+$'));
 
 const bookSql = 'select book_seats(@t::uuid, @s::text[], @c::uuid, @k)';
 const tripSql = 'select driver_create_trip(@r::uuid, @d::timestamptz, @m::int, @s::jsonb)';
-const applySql = 'select apply_driver(@c, @k, @p, @s::int, @t)';
+const applySql = 'select apply_driver(@c, @k, @p, @s::text[], @t)';
 const refundSql = 'select staff_refund_booking(@b::uuid, @r)';
 const nobody = '00000000-0000-0000-0000-000000000000';
 
@@ -41,7 +41,7 @@ void main() {
     draftRoute = await w.newRoute('DRAFT', publish: false);
     driver = await w.newDriver('Арам');
     otherDriver = await w.newDriver('Гаяне');
-    smallDriver = await w.newDriver('Трёхместный', seats: 3);
+    smallDriver = await w.newDriver('Только задние места', seats: rearSeats);
     pendingDriver = await w.newDriver('Ждёт проверки', approve: false);
     rejectedDriver = await w.newDriver('Отклонённый', approve: false);
     await w.verifier.q("select staff_review_driver(@d::uuid, false, 'нет прав')", {'d': rejectedDriver.id});
@@ -71,7 +71,7 @@ void main() {
 
     // Основной рейс, вокруг которого идут атаки: до отправления 200 минут.
     trip = await driver.createTrip(route, (await w.now()).add(const Duration(minutes: 200)),
-        seats: {'front': 600, 'rl': 500, 'rm': 500, 'rr': 500});
+        seats: {'front': 600, 'rl': 500, 'rr': 500});
     booking = (await ani.book(trip, ['front'], idem: 'ani-key-1'))['booking_id'] as String;
     bobBooking = (await bob.book(trip, ['rl']))['booking_id'] as String;
   });
@@ -263,7 +263,7 @@ void main() {
     });
 
     test('повторная заявка отклонённого возвращает «на проверке», а не «одобрен»', () async {
-      await rejectedDriver.q(applySql, {'c': 'Kia Rio', 'k': 'синяя', 'p': '35 RR 001', 's': '4', 't': '01234567'});
+      await rejectedDriver.q(applySql, {'c': 'Kia Rio', 'k': 'синяя', 'p': '35 RR 001', 's': '{front,rl,rr}', 't': '01234567'});
       expect(await w.scalar("select status::text from drivers where user_id = '${rejectedDriver.id}'"), 'pending');
       expect(await count(intruder, "driver_public where user_id = '${rejectedDriver.id}'"), 0);
     });
@@ -271,7 +271,7 @@ void main() {
     test('водителя со статусом «заблокирован» не вернуть ни новой заявкой, ни проверяющим', () async {
       final banned = await w.newDriver('Забанен');
       await w.admin.execute("update drivers set status = 'blocked' where user_id = '${banned.id}'");
-      expect(await banned.refusal(applySql, {'c': 'BMW', 'k': 'чёрная', 'p': '35 BB 001', 's': '4', 't': '0999'}), 'DRIVER_BLOCKED');
+      expect(await banned.refusal(applySql, {'c': 'BMW', 'k': 'чёрная', 'p': '35 BB 001', 's': '{front,rl,rr}', 't': '0999'}), 'DRIVER_BLOCKED');
       expect(await w.verifier.refusal("select staff_review_driver('${banned.id}', true)"), 'DRIVER_BLOCKED');
       expect(await w.verifier.refusal("select staff_review_driver('${banned.id}', false, 'причина')"), 'DRIVER_BLOCKED');
       expect(await w.owner.refusal("select staff_review_driver('${banned.id}', true)"), 'DRIVER_BLOCKED');
@@ -287,14 +287,18 @@ void main() {
 
     test('заявка с мусором отклоняется целиком', () async {
       final fresh = await w.newUser('Мусорная заявка');
-      final good = {'c': 'Toyota', 'k': 'белая', 'p': '35 AA 001', 's': '4', 't': '0123'};
+      final good = {'c': 'Toyota', 'k': 'белая', 'p': '35 AA 001', 's': '{front,rl,rr}', 't': '0123'};
       final cases = <Map<String, Object?>, String>{
-        {...good, 's': '99'}: 'BAD_SEATS_TOTAL',
-        {...good, 's': '0'}: 'BAD_SEATS_TOTAL',
-        {...good, 's': '-4'}: 'BAD_SEATS_TOTAL',
-        {...good, 's': '2'}: 'BAD_SEATS_TOTAL',
-        {...good, 's': '5'}: 'BAD_SEATS_TOTAL',
-        {...good, 's': '2147483647'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{front,rl,rr,rm}'}: 'BAD_SEATS_TOTAL', // сзади не больше двух пассажиров
+        {...good, 's': '{rm}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{front,front}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{rl,rr,rl,rr}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{NULL}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{rl,NULL}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{{rl,rr}}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{FRONT}'}: 'BAD_SEATS_TOTAL',
+        {...good, 's': '{trunk}'}: 'BAD_SEATS_TOTAL',
         {...good, 's': null}: 'BAD_SEATS_TOTAL',
         {...good, 'c': null}: 'BAD_ARGUMENT',
         {...good, 'c': ''}: 'BAD_ARGUMENT',
@@ -340,11 +344,11 @@ void main() {
 
     // ИСПРАВЛЕНО: свою заявку проверять нельзя — FORBIDDEN, в том числе владельцу.
     test('проверяющий не может одобрить самого себя', () async {
-      await w.verifier.q(applySql, {'c': 'Lada', 'k': 'серая', 'p': '35 VV 001', 's': '4', 't': '0555'});
+      await w.verifier.q(applySql, {'c': 'Lada', 'k': 'серая', 'p': '35 VV 001', 's': '{front,rl,rr}', 't': '0555'});
       expect(await w.verifier.refusal("select staff_review_driver('${w.verifier.id}', true)"), 'FORBIDDEN');
       expect(await w.verifier.refusal("select staff_review_driver('${w.verifier.id}', false, 'сам себе')"), 'FORBIDDEN');
       expect(await w.scalar("select status::text from drivers where user_id = '${w.verifier.id}'"), 'pending');
-      await w.owner.q(applySql, {'c': 'Lada', 'k': 'серая', 'p': '35 OW 001', 's': '4', 't': '0556'});
+      await w.owner.q(applySql, {'c': 'Lada', 'k': 'серая', 'p': '35 OW 001', 's': '{front,rl,rr}', 't': '0556'});
       expect(await w.owner.refusal("select staff_review_driver('${w.owner.id}', true)"), 'FORBIDDEN');
       expect(await w.scalar("select status::text from drivers where user_id = '${w.owner.id}'"), 'pending');
       expect(await count(intruder, "driver_public where user_id in ('${w.verifier.id}', '${w.owner.id}')"), 0);
@@ -683,8 +687,10 @@ void main() {
       for (final c in cases.entries) {
         expect(await otherDriver.refusal(tripSql, c.key), c.value, reason: '${c.key}');
       }
-      expect(await smallDriver.refusal(tripSql, {...good, 's': '[{"id":"rm","price":500}]'}), 'BAD_SEATS',
-          reason: 'в трёхместной машине нет среднего места');
+      expect(await otherDriver.refusal(tripSql, {...good, 's': '[{"id":"rm","price":500}]'}), 'BAD_SEATS',
+          reason: 'среднего места сзади нет ни в одной машине');
+      expect(await smallDriver.refusal(tripSql, {...good, 's': '[{"id":"front","price":500}]'}), 'BAD_SEATS',
+          reason: 'переднее место этот водитель в анкете не отметил');
       expect(await total("trips where driver_id = '${otherDriver.id}'"), before);
       expect(await total("trips where driver_id = '${smallDriver.id}'"), 0);
     });
@@ -1011,7 +1017,7 @@ void main() {
         "select cancel_booking('$booking')",
         "select driver_cancel_trip('$trip')",
         "select * from trip_passengers('$trip')",
-        "select apply_driver('a', 'b', 'c', 4, 'd')",
+        "select apply_driver('a', 'b', 'c', '{front}', 'd')",
         "select bind_card_sim('4111111111111111')",
         "select register_profile('Новое имя', 'ru')",
         'select driver_earnings()',
@@ -1165,8 +1171,8 @@ void main() {
       revoked = await w.newDriver('Отозванный');
       rider = await w.newPassenger('Пассажир отозванного');
       final now = await w.now();
-      startedTrip = await revoked.createTrip(route, now.add(const Duration(minutes: 20)), seats: {'front': 600, 'rm': 500});
-      revTrip = await revoked.createTrip(route, now.add(const Duration(minutes: 120)), seats: {'front': 600, 'rm': 500});
+      startedTrip = await revoked.createTrip(route, now.add(const Duration(minutes: 20)), seats: {'front': 600, 'rr': 500});
+      revTrip = await revoked.createTrip(route, now.add(const Duration(minutes: 120)), seats: {'front': 600, 'rr': 500});
       revBooking = (await rider.book(revTrip, ['front']))['booking_id'] as String;
       await w.advance(const Duration(minutes: 6));
       await revoked.q("select driver_start_trip('$startedTrip')");
@@ -1179,7 +1185,6 @@ void main() {
       await w.advance(const Duration(minutes: 15));
       await revoked.refusal("select driver_finish_trip('$startedTrip')");
       await w.support.refusal("select driver_cancel_trip('$revTrip')");
-      await w.admin.execute("update drivers set seats_total = 4 where user_id = '${revoked.id}'");
     });
 
     test('исчезает из витрины и не может поставить новый рейс', () async {
@@ -1211,24 +1216,24 @@ void main() {
       final before = await total('bookings');
       final payments = await total('payments');
       expect(await bob.refusal(bookSql, {'t': revTrip, 's': '{front}', 'c': bob.cardId, 'k': 'after-revoke-1'}), 'TRIP_CLOSED');
-      expect(await bob.refusal(bookSql, {'t': revTrip, 's': '{rm}', 'c': bob.cardId, 'k': 'after-revoke-2'}), 'TRIP_CLOSED');
+      expect(await bob.refusal(bookSql, {'t': revTrip, 's': '{rr}', 'c': bob.cardId, 'k': 'after-revoke-2'}), 'TRIP_CLOSED');
       expect(await bob.refusal(bookSql, {'t': startedTrip, 's': '{front}', 'c': bob.cardId, 'k': 'after-revoke-3'}), 'TRIP_CLOSED');
       expect(await total('bookings'), before);
       expect(await total('payments'), payments);
     });
 
     // ИСПРАВЛЕНО: менять машину нельзя при любом статусе водителя, пока у него есть не завершённый рейс, —
-    // DRIVER_HAS_ACTIVE_TRIPS. (На начатом рейсе выставлено среднее место «rm», а в заявке — машина на 3 места.)
+    // DRIVER_HAS_ACTIVE_TRIPS. (На начатом рейсе выставлено переднее место, а в новой заявке его нет.)
     test('не может сменить машину, пока у него есть действующий рейс', () async {
       Future<Object?> card() => w.scalar("select status::text || '/' || car || '/' || seats_total || '/' || coalesce(reject_reason, '') "
           "from drivers where user_id = '${revoked.id}'");
       final before = await card();
-      expect(await revoked.refusal(applySql, {'c': 'Smart', 'k': 'красная', 'p': '35 SS 001', 's': '3', 't': '0777'}),
+      expect(await revoked.refusal(applySql, {'c': 'Smart', 'k': 'красная', 'p': '35 SS 001', 's': '{rl,rr}', 't': '0777'}),
           'DRIVER_HAS_ACTIVE_TRIPS');
-      expect(await revoked.refusal(applySql, {'c': 'Toyota Camry', 'k': 'белая', 'p': '35 SS 001', 's': '4', 't': '0777'}),
+      expect(await revoked.refusal(applySql, {'c': 'Toyota Camry', 'k': 'белая', 'p': '35 SS 001', 's': '{front,rl,rr}', 't': '0777'}),
           'DRIVER_HAS_ACTIVE_TRIPS', reason: 'и с той же машиной: заявка вернула бы статус «на проверке» посреди рейса');
       expect(await card(), before);
-      expect(before, 'rejected/Toyota Camry/4/поддельные документы');
+      expect(before, 'rejected/Toyota Camry/3/поддельные документы');
       expect(await violations(w), isEmpty);
     });
 
@@ -1346,8 +1351,8 @@ void main() {
     // чем отбор «не заблокирован». Верная догадка о скрытой строке даёт ошибку деления на ноль, неверная — пустой ответ.
     test('скрытую строку витрины нельзя подобрать перебором', () async {
       String guess(int seats) => "select count(*) from driver_public where user_id = '${blocked.id}' and 1 / (seats_total - $seats) > 0";
-      final answers = {for (final seats in [3, 4]) seats: await intruder.refusal(guess(seats))};
-      expect(answers, {3: null, 4: null}, reason: 'ответ на верную догадку отличается: посторонний узнал, что в машине 4 места');
+      final answers = {for (final seats in [2, 3]) seats: await intruder.refusal(guess(seats))};
+      expect(answers, {2: null, 3: null}, reason: 'ответ на верную догадку отличается: посторонний узнал, что в машине 3 места');
     });
 
     // ИСПРАВЛЕНО: при блокировке водителя его не начатые рейсы отменяются, пассажирам возвращаются все деньги.
@@ -1430,11 +1435,11 @@ void main() {
 
     test('поддержка возвращает оплаченную бронь полностью, один раз, с записью в журнал действий', () async {
       final complainer = await w.newPassenger('Жалобщик');
-      final mine = (await complainer.book(trip, ['rm']))['booking_id'] as String;
+      final mine = (await complainer.book(trip, ['rr']))['booking_id'] as String;
       final ledger = await total('ledger');
       expect(await w.support.one(refundSql, {'b': mine, 'r': '  $injection  '}), 500);
       expect(await w.scalar("select status::text || '/' || amount || '/' || refund from bookings where id = '$mine'"), 'cancelled/500/500');
-      expect(await w.scalar("select booking_id::text from trip_seats where trip_id = '$trip' and seat_id = 'rm'"), isNull);
+      expect(await w.scalar("select booking_id::text from trip_seats where trip_id = '$trip' and seat_id = 'rr'"), isNull);
       expect(await w.scalar("select coalesce(sum(amount), 0)::int from ledger where booking_id = '$mine' and kind = 'refund'"), 500);
       expect(await total('ledger'), ledger + 1);
       expect(
@@ -1462,7 +1467,7 @@ void main() {
       await inj.q('select register_profile(@n, @l)', {'n': name, 'l': 'ru'});
       expect(await w.scalar("select name from profiles where id = '${inj.id}'"), name);
 
-      await inj.q(applySql, {'c': "'; drop table drivers; --", 'k': "' or 1=1 --", 'p': "'; select 1; --", 's': '4', 't': "1' or '1'='1"});
+      await inj.q(applySql, {'c': "'; drop table drivers; --", 'k': "' or 1=1 --", 'p': "'; select 1; --", 's': '{front,rl,rr}', 't': "1' or '1'='1"});
       expect(await w.scalar("select car from drivers where user_id = '${inj.id}'"), "'; drop table drivers; --");
       expect(await w.scalar("select status::text from drivers where user_id = '${inj.id}'"), 'pending');
 
@@ -1517,7 +1522,7 @@ void main() {
         "select staff_block_user('${w.owner.id}', true)",
         "select register_profile('Без входа', 'ru')",
         "select staff_set_roles('${intruder.id}', '{owner}')",
-        "select apply_driver('a', 'b', 'c', 4, 'd')",
+        "select apply_driver('a', 'b', 'c', '{front}', 'd')",
         "select bind_card_sim('4111111111111111')",
       ]) {
         expect(await rawRefusal('anon', '{"role":"anon"}', sql), denied, reason: sql);

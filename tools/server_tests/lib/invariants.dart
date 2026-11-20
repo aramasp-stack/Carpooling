@@ -101,10 +101,21 @@ const invariants = <String, String>{
     select count(*) from payouts p left join payout_cards c on c.id = p.card_id where c.id is null or c.driver_id <> p.driver_id''',
   'место рейса есть в машине водителя': '''
     select count(*) from trip_seats s join trips t on t.id = s.trip_id join drivers d on d.user_id = t.driver_id
-    where s.seat_id = 'rm' and d.seats_total = 3 and t.status in ('planned', 'started')''',
+    where not (s.seat_id = any(d.seat_ids)) and t.status in ('planned', 'started')''',
+  'сзади в машине не больше двух пассажиров: мест — не больше трёх, среднего места нет': '''
+    select (select count(*) from drivers where cardinality(seat_ids) > 3 or seats_total <> cardinality(seat_ids)
+                                            or not (seat_ids <@ array['front', 'rl', 'rr']))
+         + (select count(*) from trip_seats where seat_id not in ('front', 'rl', 'rr'))''',
   'место посадки — в начальном районе маршрута': '''
     select count(*) from trips t join routes r on r.id = t.route_id
     where t.meet_along < 0 or t.meet_along > least(1500, r.length_m)''',
+  'точные места посадки и высадки — внутри круга 1,5 км у начала и у конца маршрута': '''
+    select count(*) from trips t join routes r on r.id = t.route_id
+    where (t.meet_lat is not null and private._distance_m(t.meet_lat, t.meet_lon, r.from_lat, r.from_lon) > 1500)
+       or (t.drop_lat is not null and private._distance_m(t.drop_lat, t.drop_lon, r.to_lat, r.to_lon) > 1500)''',
+  'место высадки — в конечном районе маршрута, дальше места посадки': '''
+    select count(*) from trips t join routes r on r.id = t.route_id
+    where t.drop_along is not null and (t.drop_along > r.length_m or t.drop_along < r.length_m - 1500 or t.drop_along <= t.meet_along)''',
   'рейтинг водителя равен среднему его оценок': '''
     select count(*) from drivers d
     where d.rating_count <> (select count(*) from bookings b join trips t on t.id = b.trip_id where t.driver_id = d.user_id and b.rating is not null)

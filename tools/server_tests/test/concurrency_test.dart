@@ -41,11 +41,11 @@ void main() {
     expect(await w.scalar("select count(*)::int from ledger where trip_id = @t::uuid and kind = 'charge'", {'t': trip}), 1);
   });
 
-  test('60 человек одновременно разбирают 4 места: каждое продано один раз', () async {
+  test('60 человек одновременно разбирают 3 места: каждое продано один раз', () async {
     final driver = await w.newDriver('Гаяне');
-    final trip = await driver.createTrip(route, await inMinutes(200), seats: {'front': 600, 'rl': 500, 'rm': 400, 'rr': 500});
+    final trip = await driver.createTrip(route, await inMinutes(200), seats: {'front': 600, 'rl': 500, 'rr': 500});
     final rnd = Random(7);
-    const all = ['front', 'rl', 'rm', 'rr'];
+    const all = ['front', 'rl', 'rr'];
     final res = await together(crowd.map((p) {
       final seats = (List.of(all)..shuffle(rnd)).take(1 + rnd.nextInt(2)).toList();
       return () => p.book(trip, seats);
@@ -54,7 +54,7 @@ void main() {
     final soldSeats = await w.scalar('select count(*)::int from trip_seats where trip_id = @t::uuid and booking_id is not null', {'t': trip});
     final charged = await w.scalar("select coalesce(sum(amount), 0)::int from ledger where trip_id = @t::uuid and kind = 'charge'", {'t': trip});
     final soldValue = await w.scalar('select coalesce(sum(price), 0)::int from trip_seats where trip_id = @t::uuid and booking_id is not null', {'t': trip});
-    expect(soldSeats, 4, reason: 'при 60 желающих должны уйти все места');
+    expect(soldSeats, 3, reason: 'при 60 желающих должны уйти все места');
     expect(charged, soldValue, reason: 'списано ровно за проданные места');
     expect(paid.fold<int>(0, (s, r) => s + (r['amount'] as int)), charged);
   });
@@ -92,16 +92,16 @@ void main() {
     final rnd = Random(11);
     for (var round = 0; round < 25; round++) {
       final driver = await w.newDriver('Водитель $round');
-      final trip = await driver.createTrip(route, await inMinutes(200), seats: {'front': 600, 'rl': 500, 'rm': 400, 'rr': 500});
+      final trip = await driver.createTrip(route, await inMinutes(200), seats: {'front': 600, 'rl': 500, 'rr': 500});
       final buyers = (List.of(crowd)..shuffle(rnd)).take(8).toList();
-      final first = await together(buyers.map((p) => () => p.book(trip, [const ['front', 'rl', 'rm', 'rr'][rnd.nextInt(4)]])));
+      final first = await together(buyers.map((p) => () => p.book(trip, [const ['front', 'rl', 'rr'][rnd.nextInt(3)]])));
       final mine = <Actor, String>{
         for (var i = 0; i < buyers.length; i++)
           if (first[i] is Map && (first[i] as Map)['status'] == 'paid') buyers[i]: (first[i] as Map)['booking_id'] as String,
       };
       await together([
         for (final e in mine.entries) () => e.key.cancel(e.value),
-        for (final p in buyers) () => p.book(trip, [const ['front', 'rl', 'rm', 'rr'][rnd.nextInt(4)]]),
+        for (final p in buyers) () => p.book(trip, [const ['front', 'rl', 'rr'][rnd.nextInt(3)]]),
         if (round.isOdd) () => driver.q('select driver_cancel_trip(@t::uuid)', {'t': trip}),
       ]);
     }

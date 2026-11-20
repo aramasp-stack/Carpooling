@@ -23,7 +23,7 @@ void main() {
     final routes = [
       for (var i = 0; i < 6; i++) await w.newRoute('S$i', price: 300 + 100 * rnd.nextInt(8), minPrice: 300, minutes: 8 + rnd.nextInt(25), length: 2000 + rnd.nextInt(9000)),
     ];
-    final drivers = [for (var i = 0; i < 10; i++) await w.newDriver('Водитель $i', seats: i.isEven ? 4 : 3)];
+    final drivers = [for (var i = 0; i < 10; i++) await w.newDriver('Водитель $i', seats: i.isEven ? carSeats : rearSeats)];
     final passengers = [
       for (var i = 0; i < 40; i++)
         await w.newPassenger('Пассажир $i', card: i % 13 == 0 ? '4111111111110002' : (i % 17 == 0 ? '4111111111110119' : '4111111111111111')),
@@ -50,8 +50,8 @@ void main() {
       if (dice < 14) {
         // водитель ставит рейс
         final d = pick(drivers);
-        final four = drivers.indexOf(d).isEven;
-        final all = ['front', 'rl', 'rr', if (four || rnd.nextInt(10) == 0) 'rm']..shuffle(rnd);
+        final full = drivers.indexOf(d).isEven;
+        final all = ['rl', 'rr', if (full || rnd.nextInt(10) == 0) 'front', if (rnd.nextInt(20) == 0) 'rm']..shuffle(rnd);
         final seats = {for (final s in all.take(1 + rnd.nextInt(all.length))) s: 100 * (2 + rnd.nextInt(8))};
         final dep = (await w.now()).add(Duration(minutes: 10 + rnd.nextInt(900)));
         await act('рейс', () => d.createTrip(pick(routes), dep, meet: rnd.nextInt(1700), seats: seats));
@@ -59,7 +59,7 @@ void main() {
         // пассажир покупает места
         final trips = await ids("select id::text from trips where status = 'planned' order by random() limit 5");
         if (trips.isEmpty) return;
-        final seats = (['front', 'rl', 'rm', 'rr']..shuffle(rnd)).take(1 + rnd.nextInt(2)).toList();
+        final seats = (['front', 'rl', 'rr', if (rnd.nextInt(20) == 0) 'rm']..shuffle(rnd)).take(1 + rnd.nextInt(2)).toList();
         final p = pick(passengers);
         await act('бронь', () async {
           final r = await p.book(pick(trips), seats);
