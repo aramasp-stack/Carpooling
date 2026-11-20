@@ -1,92 +1,61 @@
 part of '../home.dart';
 
-/// Главная: рейс на сегодня крупно, кнопка «Новый рейс», рейсы по дням.
+/// «Мои рейсы»: только рейсы, на которые водитель записался сам, по дням.
 extension TripsPanel on DriverHomeState {
   Widget tripsPanel() {
     final list = myTrips(day);
-    final next = myTrips(0).where((t) => statusOf(t) != TripStatus.finished).firstOrNull;
+    final any = [for (var d = -1; d < 7; d++) ...myTrips(d)].isNotEmpty;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      if (next != null) _todayCard(next) else _noTripToday(),
-      const SizedBox(height: 12),
-      FilledButton.icon(
-        onPressed: () => push(RoutePickPane()),
-        style: FilledButton.styleFrom(minimumSize: const Size.fromHeight(52)),
-        icon: const Icon(Icons.add),
-        label: const Text('Новый рейс', style: TextStyle(fontSize: 16)),
-      ),
-      const SizedBox(height: 12),
-      SingleChildScrollView(
-        scrollDirection: Axis.horizontal,
-        child: Row(children: [
-          for (var d = 0; d < 7; d++)
-            Padding(
-              padding: const EdgeInsets.only(right: 8),
-              child: ChoiceChip(label: Text(dayLabel(d)), selected: day == d, onSelected: (_) => update(() => day = d)),
+      Row(children: [
+        const Expanded(child: Text('Мои рейсы', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w700))),
+        TextButton.icon(
+          onPressed: () => goTab(DriverTab.routes),
+          icon: const Icon(Icons.add),
+          label: const Text('Новый рейс'),
+        ),
+      ]),
+      const SizedBox(height: 6),
+      if (!any)
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(color: _accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+            const Text('У вас пока нет рейсов.', style: TextStyle(fontWeight: FontWeight.w700)),
+            const SizedBox(height: 2),
+            const Text('Найдите маршрут рядом с собой и запишитесь на рейс: выберите время, место посадки и цены мест.',
+                style: TextStyle(fontSize: 13, color: AppColors.muted)),
+            const SizedBox(height: 10),
+            FilledButton.icon(
+              onPressed: () => goTab(DriverTab.routes),
+              icon: const Icon(Icons.search),
+              label: const Text('Найти маршрут'),
             ),
-        ]),
-      ),
-      const SizedBox(height: 10),
-      if (list.isEmpty)
-        const Padding(
-          padding: EdgeInsets.all(18),
-          child: Text('На этот день рейсов нет. Нажмите «Новый рейс».', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted)),
-        ),
-      for (final t in list) _tripItem(t),
-    ]);
-  }
-
-  Widget _noTripToday() => Container(
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(color: _accent.withValues(alpha: 0.08), borderRadius: BorderRadius.circular(14)),
-        child: Text(
-          myTrips(0).isEmpty && myTrips(1).isEmpty
-              ? 'Здравствуйте, ${_demo.name}! Рейсов пока нет: нажмите «Новый рейс», выберите маршрут, время и цены мест.'
-              : 'Здравствуйте, ${_demo.name}! На сегодня рейсов больше нет.',
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
-      );
-
-  /// Ближайший рейс сегодня: время, место посадки, сколько продано и на какую сумму.
-  Widget _todayCard(Trip t) {
-    final sold = t.seats.where((s) => s.taken).length;
-    final status = statusOf(t);
-    final money = moneyOf(t);
-    return Material(
-      color: _accent,
-      borderRadius: BorderRadius.circular(18),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(18),
-        onTap: () => push(TripPane(t.id)),
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text(status == TripStatus.started ? 'Сейчас в пути' : 'Ближайший рейс сегодня',
-                style: const TextStyle(color: Color(0xFFCCFBF1), fontSize: 13)),
-            Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-              Text(hhmm(t.departure), style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w800)),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: Text(t.route.title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+          ]),
+        )
+      else ...[
+        SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          child: Row(children: [
+            for (var d = -1; d < 7; d++)
+              Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: ChoiceChip(
+                  label: Text(d == -1 ? 'Вчера' : dayLabel(d)),
+                  selected: day == d,
+                  onSelected: (_) => update(() => day = d),
                 ),
               ),
-            ]),
-            Text('Посадка: ${meetText(t)}', style: const TextStyle(color: Color(0xFFCCFBF1), fontSize: 13)),
-            const SizedBox(height: 8),
-            Row(children: [
-              Text('Продано $sold из ${t.seats.length} · ${amd(money.paid)}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
-              const Spacer(),
-              if (canStart(t) && status == TripStatus.planned)
-                const Text('Можно начинать →', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w700))
-              else
-                const Icon(Icons.chevron_right, color: Colors.white),
-            ]),
           ]),
         ),
-      ),
-    );
+        const SizedBox(height: 10),
+        if (list.isEmpty)
+          const Padding(
+            padding: EdgeInsets.all(18),
+            child: Text('На этот день рейсов нет.', textAlign: TextAlign.center, style: TextStyle(color: AppColors.muted)),
+          ),
+        for (final t in list) _tripItem(t),
+      ],
+    ]);
   }
 
   /// «у начала маршрута» или «в 400 м от «Давташен»».
@@ -95,33 +64,40 @@ extension TripsPanel on DriverHomeState {
   Widget _tripItem(Trip t) {
     final taken = t.seats.where((s) => s.taken).length;
     final status = statusOf(t);
-    return outlined(
-      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Swatch(Color(t.route.color)),
-          const SizedBox(width: 8),
-          Text(hhmm(t.departure), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
-          const Spacer(),
-          StatusChip(statusText(status), kind: status == TripStatus.finished ? StatusKind.done : StatusKind.ok),
+    final gone = missed(t);
+    return Opacity(
+      opacity: gone ? 0.6 : 1,
+      child: outlined(
+        Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Swatch(Color(t.route.color)),
+            const SizedBox(width: 8),
+            Text(hhmm(t.departure), style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+            const Spacer(),
+            StatusChip(tripLabel(t), kind: gone ? StatusKind.off : (status == TripStatus.finished ? StatusKind.done : StatusKind.ok)),
+          ]),
+          const SizedBox(height: 2),
+          Text(t.route.title),
+          const SizedBox(height: 8),
+          if (gone)
+            const Text('Вы не начали рейс вовремя. Пассажирам вернули деньги.', style: TextStyle(fontSize: 13, color: AppColors.muted))
+          else
+            Row(children: [
+              for (final s in t.seats)
+                Container(
+                  width: 11,
+                  height: 11,
+                  margin: const EdgeInsets.only(right: 4),
+                  decoration: BoxDecoration(color: s.taken ? _accent : AppColors.line, borderRadius: BorderRadius.circular(3)),
+                ),
+              const SizedBox(width: 6),
+              Text(taken == 0 ? 'мест пока не купили' : 'куплено $taken из ${t.seats.length}', style: const TextStyle(fontSize: 13)),
+              const Spacer(),
+              if (taken > 0) Text('вам ${amd(moneyOf(t).driver)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+            ]),
         ]),
-        const SizedBox(height: 2),
-        Text('${t.route.title}${t.custom ? ' · создан вами' : ''}'),
-        const SizedBox(height: 8),
-        Row(children: [
-          for (final s in t.seats)
-            Container(
-              width: 11,
-              height: 11,
-              margin: const EdgeInsets.only(right: 4),
-              decoration: BoxDecoration(color: s.taken ? _accent : AppColors.line, borderRadius: BorderRadius.circular(3)),
-            ),
-          const SizedBox(width: 6),
-          Text('продано $taken из ${t.seats.length}', style: const TextStyle(fontSize: 13)),
-          const Spacer(),
-          Text('вам ${amd(moneyOf(t).driver)}', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
-        ]),
-      ]),
-      onTap: () => push(TripPane(t.id)),
+        onTap: () => push(TripPane(t.id)),
+      ),
     );
   }
 }

@@ -281,7 +281,11 @@ class DriverStore {
   // ---------- отменённые рейсы ----------
   Set<String> get cancelledTrips => ((_all()['cancelled'] as List?) ?? const []).cast<String>().toSet();
 
-  Future<void> cancelTrip(String tripId) => _put('cancelled', {...cancelledTrips, tripId}.toList());
+  /// Рейс отменён: запоминаем это и забываем демо-продажи (пассажирам — полный возврат).
+  Future<void> cancelTrip(String tripId) async {
+    await _put('cancelled', {...cancelledTrips, tripId}.toList());
+    await _put('demoSales', demoSales..remove(tripId));
+  }
 
   /// Начать заново (демо): забыть всё о водителе.
   Future<void> reset() => kv.write(_key, jsonEncode({}));

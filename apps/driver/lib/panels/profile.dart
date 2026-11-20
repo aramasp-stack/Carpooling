@@ -83,11 +83,14 @@ extension ProfileScreen on DriverHomeState {
       OutlinedButton(
         onPressed: () async {
           await me.reset();
+          for (final c in data.customTrips()) {
+            await data.removeCustomTrip(c.id);
+          }
           update(() {
             codeSent = false;
             offerAccepted = false;
-            stack = [TripsPane()];
-            tab = DriverTab.trips;
+            stack = [RoutePickPane()];
+            tab = DriverTab.routes;
           });
         },
         child: const Text('Демо: начать заново с анкеты'),

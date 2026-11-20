@@ -57,6 +57,10 @@ void main() {
       expect(hhmm(t.departure), '10:15');
       expect(t.driver.name, 'Арам');
       expect(s.tripById(t.id), isNotNull);
+      // Отменённый рейс удаляется совсем: его нет ни в расписании, ни по номеру.
+      await data.removeCustomTrip(t.id);
+      expect(s.tripsFor(route, 1).where((t) => t.custom), isEmpty);
+      expect(s.tripById(t.id), isNull);
     });
 
     test('место посадки: у демо-рейсов в начальном районе, у рейса водителя — сохраняется', () async {

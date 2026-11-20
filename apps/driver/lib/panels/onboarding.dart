@@ -230,8 +230,8 @@ extension Onboarding on DriverHomeState {
               child: FilledButton(
                 onPressed: () async {
                   await me.review(approve: true);
-                  goTab(DriverTab.trips);
-                  if (mounted) toast(context, 'Анкета одобрена. Можно публиковать рейсы.');
+                  goTab(DriverTab.routes);
+                  if (mounted) toast(context, 'Анкета одобрена. Найдите маршрут и запишитесь на рейс.');
                 },
                 child: const Text('Одобрить'),
               ),

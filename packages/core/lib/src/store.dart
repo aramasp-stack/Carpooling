@@ -61,6 +61,10 @@ class DataStore {
   Future<void> addCustomTrip(CustomTrip t) =>
       kv.write(_custom, jsonEncode([...customTrips(), t].map((x) => x.toJson()).toList()));
 
+  /// Удалить рейс водителя совсем (отменён или так и не состоялся).
+  Future<void> removeCustomTrip(String id) =>
+      kv.write(_custom, jsonEncode(customTrips().where((x) => x.id != id).map((x) => x.toJson()).toList()));
+
   // ---------- отметки водителя «сел / не пришёл» ----------
   Map<String, Boarding> boarding(String tripId) {
     final m = (_map(_boarding)[tripId] as Map<String, dynamic>?) ?? {};

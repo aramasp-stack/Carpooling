@@ -5,6 +5,7 @@ extension TripScreen on DriverHomeState {
   Widget tripPanel(String id) {
     final t = tripOf(id);
     if (t == null || me.cancelledTrips.contains(id)) return BackLink('Мои рейсы', onTap: () => goTab(DriverTab.trips));
+    if (missed(t)) return _missedPanel(t);
     final status = statusOf(t);
     final marks = data.boarding(t.id);
     final taken = t.seats.where((s) => s.taken).toList();
@@ -47,7 +48,8 @@ extension TripScreen on DriverHomeState {
           decoration: BoxDecoration(border: Border.all(color: AppColors.line), borderRadius: BorderRadius.circular(14)),
           child: Text('${s.label} — свободно · ${amd(s.price)}', style: const TextStyle(color: AppColors.muted)),
         ),
-      Container(
+      // Деньги — только когда места уже купили: нули ни о чём не говорят.
+      if (taken.isNotEmpty) Container(
         margin: const EdgeInsets.symmetric(vertical: 8),
         padding: const EdgeInsets.all(12),
         decoration: BoxDecoration(color: AppColors.surface, borderRadius: BorderRadius.circular(12)),
@@ -61,6 +63,39 @@ extension TripScreen on DriverHomeState {
       ..._actions(t, status),
     ]);
   }
+
+  /// Рейс не начали до конца его времени: он не состоялся, деньги пассажирам вернули. Можно убрать из списка.
+  Widget _missedPanel(Trip t) => Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        BackLink('Мои рейсы', onTap: pop),
+        Row(children: [
+          Expanded(
+            child: Text('${hhmm(t.departure)} · ${dayLabel(dayOffsetOf(t.departure, now: trips.now))}',
+                style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+          ),
+          const StatusChip('Не состоялся', kind: StatusKind.off),
+        ]),
+        const SizedBox(height: 6),
+        Text(t.route.title),
+        const SizedBox(height: 10),
+        NoteBox('Рейс не начали до ${hhmm(endOf(t))} — он не состоялся. '
+            '${t.seats.any((s) => s.taken) ? 'Пассажирам вернули деньги полностью, в заработок он не входит.' : 'Мест никто не купил.'}'),
+        OutlinedButton.icon(
+          onPressed: () async {
+            await removeTrip(t);
+            if (!mounted) return;
+            toast(context, 'Рейс убран из списка.');
+            goTab(DriverTab.trips);
+          },
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('Убрать из списка'),
+        ),
+        const SizedBox(height: 8),
+        OutlinedButton.icon(
+          onPressed: () => push(NewTripPane(t.route, template: t)),
+          icon: const Icon(Icons.replay),
+          label: const Text('Поставить такой же рейс'),
+        ),
+      ]);
 
   List<Widget> _actions(Trip t, TripStatus status) => switch (status) {
         TripStatus.planned => [
@@ -281,7 +316,7 @@ extension TripScreen on DriverHomeState {
       ),
     );
     if (ok != true) return;
-    await me.cancelTrip(t.id);
+    await removeTrip(t);
     if (!mounted) return;
     toast(context, n == 0 ? 'Рейс отменён.' : 'Рейс отменён, пассажирам вернём деньги.');
     goTab(DriverTab.trips);

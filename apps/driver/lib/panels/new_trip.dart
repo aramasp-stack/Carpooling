@@ -226,6 +226,7 @@ class _NewTripPanelState extends State<NewTripPanel> {
     h.onMapTapHandler = null;
     h.update(() {
       h.day = day;
+      h.tab = DriverTab.trips;
       h.stack = [TripsPane(), TripPane(id)];
     });
     h.syncMap();

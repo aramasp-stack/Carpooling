@@ -19,14 +19,15 @@ const _accent = AppColors.driver;
 /// Демо-водитель: его рейсы есть в демо-расписании.
 final _demo = Demo.drivers[Demo.meIndex];
 
-enum DriverTab { trips, money, profile }
+enum DriverTab { routes, trips, money, profile }
 
 /// Что сейчас показано в панели.
 sealed class Pane {}
 
+/// «Мои рейсы»: только рейсы, которые водитель поставил сам.
 class TripsPane extends Pane {}
 
-/// Новый рейс, шаг 1: выбор маршрута.
+/// Главный экран: поиск маршрута («Откуда» / «Куда»).
 class RoutePickPane extends Pane {}
 
 /// Новый рейс, шаг 2: день, время, место посадки, места и цены. [template] — «Повторить» прошлый рейс.
@@ -69,16 +70,24 @@ class DriverHomeState extends State<DriverHome> {
   DriverStore get me => widget.driver;
   Map<String, RouteGeometry> geoms = {};
 
-  DriverTab tab = DriverTab.trips;
-  List<Pane> stack = [TripsPane()];
+  DriverTab tab = DriverTab.routes;
+  List<Pane> stack = [RoutePickPane()];
   Pane get pane => stack.last;
   int day = 0;
 
-  // Поиск маршрута для нового рейса
+  // Поиск маршрута: «откуда» и «куда»
   final fromCtl = TextEditingController();
+  final toCtl = TextEditingController();
   Place? from;
-  bool fromSuggest = false;
-  bool pickOnMap = false;
+  Place? to;
+
+  /// Чей список подсказок открыт: 'from', 'to' или никакой.
+  String? suggestFor;
+  String suggestQuery = '';
+
+  /// Какую точку выбирают касанием карты: 'from', 'to' или никакую.
+  String? pickFor;
+  bool showAllRoutes = false;
 
   // Анкета
   final carCtl = TextEditingController();
@@ -118,7 +127,7 @@ class DriverHomeState extends State<DriverHome> {
   @override
   void dispose() {
     simTimer?.cancel();
-    for (final c in [fromCtl, carCtl, colorCtl, plateCtl, taxCtl, phoneCtl, codeCtl]) {
+    for (final c in [fromCtl, toCtl, carCtl, colorCtl, plateCtl, taxCtl, phoneCtl, codeCtl]) {
       c.dispose();
     }
     super.dispose();
@@ -142,17 +151,19 @@ class DriverHomeState extends State<DriverHome> {
     syncMap();
   }
 
-  void goTab(DriverTab t) {
+  void goTab(DriverTab t, {Pane? open}) {
     stopSim();
     onMapTapHandler = null;
     update(() {
       tab = t;
       stack = [
         switch (t) {
+          DriverTab.routes => RoutePickPane(),
           DriverTab.trips => TripsPane(),
           DriverTab.money => MoneyPane(),
           DriverTab.profile => ProfilePane(),
-        }
+        },
+        ?open,
       ];
     });
     syncMap();
@@ -220,6 +231,19 @@ class DriverHomeState extends State<DriverHome> {
 
   TripStatus statusOf(Trip t) => trips.statusOf(t, geoOf(t.route));
 
+  /// Рейс так и не начали, а его время прошло: он не состоялся.
+  /// (На сервере такой рейс отменяется сам, пассажирам — полный возврат.) В заработок не входит.
+  bool missed(Trip t) => data.tripStatus(t.id) == null && trips.now.isAfter(endOf(t));
+
+  /// Состояние рейса словами, с учётом «не состоялся».
+  String tripLabel(Trip t) => missed(t) ? 'Не состоялся' : statusText(statusOf(t));
+
+  /// Убрать рейс совсем: отменённый или не состоявшийся.
+  Future<void> removeTrip(Trip t) async {
+    await me.cancelTrip(t.id);
+    await data.removeCustomTrip(t.id);
+  }
+
   DateTime endOf(Trip t) => trips.endOf(t, geoOf(t.route));
 
   /// Начать рейс можно за 15 минут до отправления и до конца по расписанию.
@@ -263,13 +287,15 @@ class DriverHomeState extends State<DriverHome> {
         map.setMarker('finish', t.route.to.point, MarkerKind.finish);
         map.fit(g.points);
       case RoutePickPane():
-        final list = from == null ? Demo.routes : routesNear(from!.point).map((x) => x.route).toList();
+        final list = routesFor(from?.point, to?.point).map((x) => x.route).toList();
         map.showRoutes([for (final r in list) MapRoute(r, geoOf(r))]);
-        if (from != null) {
-          map.setMarker('from', from!.point, MarkerKind.from);
+        if (from != null) map.setMarker('from', from!.point, MarkerKind.from);
+        if (to != null) map.setMarker('to', to!.point, MarkerKind.to);
+        if (from != null && to == null) {
           map.showAround(from!.point, meters: 2500);
         } else {
-          map.fit([for (final r in Demo.routes) ...[r.from.point, r.to.point]]);
+          final pts = [for (final r in list) ...[r.from.point, r.to.point], ?from?.point, ?to?.point];
+          map.fit(pts.isEmpty ? [for (final r in Demo.routes) ...[r.from.point, r.to.point]] : pts);
         }
       case NewTripPane():
         break; // карту ведёт сам экран нового рейса
@@ -279,14 +305,8 @@ class DriverHomeState extends State<DriverHome> {
   }
 
   void onMapTap(GeoPoint p) {
-    if (pickOnMap) {
-      update(() {
-        pickOnMap = false;
-        from = Place('Точка на карте', p);
-        fromCtl.text = 'Точка на карте';
-        fromSuggest = false;
-      });
-      syncMap();
+    if (pickFor != null) {
+      setPlace(pickFor!, Place('Точка на карте', p));
       return;
     }
     onMapTapHandler?.call(p);
@@ -378,7 +398,8 @@ class DriverHomeState extends State<DriverHome> {
                 selectedIndex: tab.index,
                 onDestinationSelected: (i) => goTab(DriverTab.values[i]),
                 destinations: const [
-                  NavigationDestination(icon: Icon(Icons.directions_car_outlined), label: 'Рейсы'),
+                  NavigationDestination(icon: Icon(Icons.search), label: 'Маршруты'),
+                  NavigationDestination(icon: Icon(Icons.directions_car_outlined), label: 'Мои рейсы'),
                   NavigationDestination(icon: Icon(Icons.account_balance_wallet_outlined), label: 'Заработок'),
                   NavigationDestination(icon: Icon(Icons.person_outline), label: 'Профиль'),
                 ],

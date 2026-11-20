@@ -13,7 +13,7 @@ extension MoneyScreen on DriverHomeState {
     final done = <Trip>[
       for (var d = -20; d <= 0; d++)
         for (final t in myTrips(d))
-          if (statusOf(t) == TripStatus.finished && moneyOf(t).paid > 0) t,
+          if (statusOf(t) == TripStatus.finished && !missed(t) && moneyOf(t).paid > 0) t,
     ]..sort((a, b) => b.departure.compareTo(a.departure));
     final week = _weekStart();
     var pending = 0, toPay = 0, paidOut = 0;
