@@ -5,7 +5,7 @@ import 'package:transport_ui/transport_ui.dart';
 
 import 'home.dart';
 
-/// TransportApp — приложение водителя. Демо-водитель — Арам.
+/// TransportApp — приложение водителя. Демо-водитель — Арам: оформление (анкета, документы, карта) проходит в приложении, проверку — демо-кнопкой.
 /// Запуск с картой: flutter run --dart-define=MAPKIT_API_KEY=ваш-ключ
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -13,18 +13,19 @@ Future<void> main() async {
   await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
   await setupMapkit();
   final store = await PrefsStore.open();
-  runApp(DriverApp(data: DataStore(store)));
+  runApp(DriverApp(data: DataStore(store), driver: DriverStore(store)));
 }
 
 class DriverApp extends StatelessWidget {
-  const DriverApp({super.key, required this.data});
+  const DriverApp({super.key, required this.data, required this.driver});
   final DataStore data;
+  final DriverStore driver;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'TransportApp Водитель',
         debugShowCheckedModeBanner: false,
         theme: buildTheme(AppColors.driver),
-        home: DriverHome(data: data),
+        home: DriverHome(data: data, driver: driver),
       );
 }

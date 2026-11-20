@@ -38,7 +38,8 @@ class RouteDef {
     required this.minutes,
     required this.from,
     required this.to,
-  });
+    int? minPrice,
+  }) : _minPrice = minPrice;
   final String id;
 
   /// Цвет линии маршрута в формате 0xAARRGGBB.
@@ -46,6 +47,14 @@ class RouteDef {
 
   /// Базовая цена места, драм.
   final int price;
+
+  final int? _minPrice;
+
+  /// Минимальная цена места: дешевле водитель место не продаст. Не задана — равна базовой.
+  int get minPrice => _minPrice ?? price;
+
+  /// Самая высокая цена места: три базовые цены.
+  int get maxPrice => price * 3;
 
   /// Время в пути по расписанию, минуты (без учёта пробок).
   final int minutes;

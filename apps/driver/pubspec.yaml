@@ -41,6 +41,7 @@ dependencies:
   transport_ui:
     path: ../../packages/ui
   url_launcher: ^6.3.3
+  geolocator: ^14.1.2
 
 dev_dependencies:
   flutter_test:

@@ -2,6 +2,7 @@
 library;
 
 export 'src/demo_data.dart';
+export 'src/driver_store.dart';
 export 'src/format.dart';
 export 'src/geo.dart';
 export 'src/models.dart';
