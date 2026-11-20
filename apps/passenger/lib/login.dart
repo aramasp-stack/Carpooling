@@ -122,6 +122,8 @@ class _LoginScreenState extends State<LoginScreen> {
         const Text('Вход по номеру телефона', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         TextField(
+          // Своё поле на каждом шаге: иначе остаётся клавиатура прошлого шага (цифры вместо букв).
+          key: const ValueKey('phone'),
           controller: phoneCtl,
           autofocus: true,
           keyboardType: TextInputType.phone,
@@ -141,6 +143,8 @@ class _LoginScreenState extends State<LoginScreen> {
             style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         TextField(
+          // Своё поле на каждом шаге: иначе остаётся клавиатура прошлого шага (цифры вместо букв).
+          key: const ValueKey('code'),
           controller: codeCtl,
           autofocus: true,
           keyboardType: TextInputType.number,
@@ -160,6 +164,8 @@ class _LoginScreenState extends State<LoginScreen> {
         const Text('Как к вам обращаться?', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
         const SizedBox(height: 12),
         TextField(
+          // Своё поле на каждом шаге: иначе остаётся клавиатура прошлого шага (цифры вместо букв).
+          key: const ValueKey('name'),
           controller: nameCtl,
           autofocus: true,
           textCapitalization: TextCapitalization.words,

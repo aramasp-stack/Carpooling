@@ -1,5 +1,11 @@
 part of '../home.dart';
 
+/// Номер для показа: +374 77 123456.
+String phoneText(String phone) {
+  final d = phone.replaceAll(RegExp(r'[^0-9]'), '');
+  return d.length == 11 && d.startsWith('374') ? '+374 ${d.substring(3, 5)} ${d.substring(5)}' : '+$d';
+}
+
 /// Мои поездки: брони пассажира с сервера, профиль, карты, выход.
 extension MinePanel on HomeState {
   Widget minePanel() {
@@ -68,7 +74,7 @@ extension MinePanel on HomeState {
           const Icon(Icons.person_outline, color: AppColors.muted),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(p == null ? 'Профиль' : '${p.name} · +${p.phone.replaceAll('+', '')}',
+            child: Text(p == null ? 'Профиль' : '${p.name} · ${phoneText(p.phone)}',
                 style: const TextStyle(fontWeight: FontWeight.w600)),
           ),
           TextButton(onPressed: widget.onSignOut, child: const Text('Выйти')),

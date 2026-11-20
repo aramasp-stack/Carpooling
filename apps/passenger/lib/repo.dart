@@ -88,7 +88,7 @@ class PassengerRepo extends ChangeNotifier {
     return [
       for (final t in _trips)
         if (t.route.id == route.id && !t.departure.isBefore(day) && t.departure.isBefore(next)) t,
-    ];
+    ]..sort((a, b) => a.departure.compareTo(b.departure));
   }
 
   Trip? tripById(String id) {

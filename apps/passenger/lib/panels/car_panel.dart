@@ -145,14 +145,49 @@ Future<String?> chooseCard(BuildContext context, PassengerRepo repo, {required i
 }
 
 /// Привязать карту (симуляция банка). Возвращает id новой карты; null — передумали.
-Future<String?> addCardDialog(BuildContext context, PassengerRepo repo) async {
+Future<String?> addCardDialog(BuildContext context, PassengerRepo repo) =>
+    showDialog<String>(context: context, builder: (_) => _AddCardDialog(repo: repo));
+
+/// Окно привязки карты. Поле ввода живёт, пока живёт окно (и закрывается вместе с ним).
+class _AddCardDialog extends StatefulWidget {
+  const _AddCardDialog({required this.repo});
+  final PassengerRepo repo;
+
+  @override
+  State<_AddCardDialog> createState() => _AddCardDialogState();
+}
+
+class _AddCardDialogState extends State<_AddCardDialog> {
   final ctl = TextEditingController();
   String? error;
-  var busy = false;
-  final id = await showDialog<String>(
-    context: context,
-    builder: (c) => StatefulBuilder(
-      builder: (c, setDialog) => AlertDialog(
+  bool busy = false;
+
+  @override
+  void dispose() {
+    ctl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _bind() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      final id = await widget.repo.bindCard(ctl.text);
+      if (mounted) Navigator.pop(context, id);
+    } on ServerError catch (e) {
+      if (mounted) {
+        setState(() {
+          busy = false;
+          error = e.text;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
         title: const Text('Привязать карту'),
         content: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           TextField(
@@ -161,6 +196,7 @@ Future<String?> addCardDialog(BuildContext context, PassengerRepo repo) async {
             keyboardType: TextInputType.number,
             inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[0-9 ]')), LengthLimitingTextInputFormatter(19)],
             decoration: InputDecoration(labelText: 'Номер карты', hintText: '4111 1111 1111 1111', errorText: error),
+            onSubmitted: (_) => busy ? null : _bind(),
           ),
           const SizedBox(height: 8),
           const Text(
@@ -170,31 +206,8 @@ Future<String?> addCardDialog(BuildContext context, PassengerRepo repo) async {
           ),
         ]),
         actions: [
-          TextButton(onPressed: busy ? null : () => Navigator.pop(c), child: const Text('Отмена')),
-          FilledButton(
-            onPressed: busy
-                ? null
-                : () async {
-                    setDialog(() {
-                      busy = true;
-                      error = null;
-                    });
-                    try {
-                      final id = await repo.bindCard(ctl.text);
-                      if (c.mounted) Navigator.pop(c, id);
-                    } on ServerError catch (e) {
-                      setDialog(() {
-                        busy = false;
-                        error = e.text;
-                      });
-                    }
-                  },
-            child: const Text('Привязать'),
-          ),
+          TextButton(onPressed: busy ? null : () => Navigator.pop(context), child: const Text('Отмена')),
+          FilledButton(onPressed: busy ? null : _bind, child: const Text('Привязать')),
         ],
-      ),
-    ),
-  );
-  ctl.dispose();
-  return id;
+      );
 }

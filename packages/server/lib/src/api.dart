@@ -161,7 +161,7 @@ class ServerApi {
             .eq('status', 'planned')
             .gte('departure', fromUtc.toUtc().toIso8601String())
             .lt('departure', toUtc.toUtc().toIso8601String())
-            .order('departure');
+            .order('departure', ascending: true);
         return [
           for (final r in rows)
             if (routes[r['route_id']] != null && drivers[r['driver_id']] != null) _trip(r, routes, drivers),
@@ -197,7 +197,7 @@ class ServerApi {
   // ---------- карты ----------
 
   Future<List<CardInfo>> cards() => _call(() async {
-        final rows = await _db.from('cards').select('id,brand,last4').isFilter('removed_at', null).order('created_at');
+        final rows = await _db.from('cards').select('id,brand,last4').isFilter('removed_at', null).order('created_at', ascending: true);
         return [for (final r in rows) CardInfo(id: r['id'] as String, brand: r['brand'] as String, last4: r['last4'] as String)];
       });
 
