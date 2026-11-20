@@ -109,6 +109,8 @@ class Trip {
     required this.seats,
     this.meetAlong = 0,
     this.dropAlong,
+    this.meetPoint,
+    this.dropPoint,
     this.custom = false,
   });
   final String id;
@@ -128,6 +130,14 @@ class Trip {
 
   /// Место высадки для линии длиной [length] метров.
   double dropOn(double length) => dropAlong == null ? length : dropAlong!.clamp(0, length).toDouble();
+
+  /// Точное место посадки, которое водитель отметил на карте (дом, двор, остановка) в районе начала маршрута.
+  /// Не отмечено — точка на линии маршрута ([meetAlong]). [meetAlong] — ближайшее к нему место на линии:
+  /// по нему считается время в пути.
+  final GeoPoint? meetPoint;
+
+  /// Точное место высадки в районе конца маршрута. Не отмечено — точка на линии ([dropAlong] или конец маршрута).
+  final GeoPoint? dropPoint;
 
   /// Рейс создан водителем в приложении (а не взят из демо-расписания).
   final bool custom;
@@ -149,6 +159,8 @@ class CustomTrip {
     required this.seats,
     this.meetAlong = 0,
     this.dropAlong,
+    this.meetPoint,
+    this.dropPoint,
   });
   final String id;
   final String routeId;
@@ -163,6 +175,10 @@ class CustomTrip {
   /// Место высадки: метры от начала маршрута (null — конец маршрута).
   final double? dropAlong;
 
+  /// Точные места посадки и высадки, отмеченные на карте (null — на линии маршрута).
+  final GeoPoint? meetPoint;
+  final GeoPoint? dropPoint;
+
   Map<String, dynamic> toJson() => {
         'id': id,
         'routeId': routeId,
@@ -172,6 +188,8 @@ class CustomTrip {
         'seats': seats.map((s) => s.toJson()).toList(),
         'meetAlong': meetAlong,
         'dropAlong': dropAlong,
+        'meetPoint': meetPoint?.toJson(),
+        'dropPoint': dropPoint?.toJson(),
       };
   factory CustomTrip.fromJson(Map<String, dynamic> j) => CustomTrip(
         id: j['id'] as String,
@@ -182,6 +200,8 @@ class CustomTrip {
         seats: (j['seats'] as List).map((e) => Seat.fromJson(e as Map<String, dynamic>)).toList(),
         meetAlong: (j['meetAlong'] as num?)?.toDouble() ?? 0,
         dropAlong: (j['dropAlong'] as num?)?.toDouble(),
+        meetPoint: j['meetPoint'] == null ? null : GeoPoint.fromJson(Map<String, dynamic>.from(j['meetPoint'] as Map)),
+        dropPoint: j['dropPoint'] == null ? null : GeoPoint.fromJson(Map<String, dynamic>.from(j['dropPoint'] as Map)),
       );
 }
 

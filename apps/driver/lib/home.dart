@@ -284,9 +284,9 @@ class DriverHomeState extends State<DriverHome> {
         final g = geoOf(t.route);
         map.showRoutes([MapRoute(t.route, g)]);
         map.setSegment(g.subLine(t.meetAlong, t.dropOn(g.length)), color: Color(t.route.color));
-        map.setMarker('meet', g.pointAt(t.meetAlong), MarkerKind.start, hint: 'Место посадки');
-        map.setMarker('finish', g.pointAt(t.dropOn(g.length)), MarkerKind.finish, hint: 'Место высадки');
-        map.fit(g.points);
+        map.setMarker('meet', t.meetAt(g), MarkerKind.start, hint: 'Место посадки');
+        map.setMarker('finish', t.dropAt(g), MarkerKind.finish, hint: 'Место высадки');
+        map.fit([...g.points, t.meetAt(g), t.dropAt(g)]);
       case RoutePickPane():
         final list = routesFor(from?.point, to?.point).map((x) => x.route).toList();
         map.showRoutes([for (final r in list) MapRoute(r, geoOf(r))]);

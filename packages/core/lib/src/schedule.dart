@@ -30,6 +30,12 @@ List<Seat> seatsFor(RouteDef route, [Iterable<String> ids = carSeatIds]) => [
           Seat(id: id, label: seatLabel(id), price: route.price + (id == 'front' ? Demo.seatFrontExtra : Demo.seatWindowExtra)),
     ];
 
+/// Точка в районе начала маршрута: здесь водитель может назначить место посадки.
+bool inStartArea(RouteDef r, GeoPoint p) => distanceMeters(p, r.from.point) <= Demo.areaRadiusMeters;
+
+/// Точка в районе конца маршрута: здесь водитель может назначить место высадки.
+bool inEndArea(RouteDef r, GeoPoint p) => distanceMeters(p, r.to.point) <= Demo.areaRadiusMeters;
+
 class TripService {
   TripService(this.data, {DateTime Function()? clock}) : _clock = clock ?? DateTime.now;
   final DataStore data;
@@ -94,6 +100,8 @@ class TripService {
           seats: c.seats.map((s) => s.copy()).toList(),
           meetAlong: c.meetAlong,
           dropAlong: c.dropAlong,
+          meetPoint: c.meetPoint,
+          dropPoint: c.dropPoint,
           custom: true,
         ),
         const {},

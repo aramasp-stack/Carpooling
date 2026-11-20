@@ -74,11 +74,32 @@ void main() {
       await data.addCustomTrip(CustomTrip(
         id: 'M1-2026-11-10-10:15-c1', routeId: 'M1', date: '2026-11-10', time: '10:15', driverIndex: 0,
         seats: seatsFor(route, const ['rl', 'rr']), meetAlong: 650, dropAlong: 8200,
+        meetPoint: const GeoPoint(40.2290, 44.4960), dropPoint: const GeoPoint(40.1790, 44.5140),
       ));
       final t = s.tripsFor(route, 1).firstWhere((t) => t.custom);
       expect(t.meetAlong, 650);
       expect(t.dropOn(9000), 8200);
       expect(t.seats.map((x) => x.id), ['rl', 'rr']);
+      final g = RouteGeometry.straight(route);
+      expect(t.meetAt(g), const GeoPoint(40.2290, 44.4960), reason: 'точное место посадки, а не точка на линии');
+      expect(t.dropAt(g), const GeoPoint(40.1790, 44.5140));
+    });
+
+    test('район начала и конца маршрута — круг 1,5 км вокруг начальной и конечной точки', () {
+      final r = Demo.routes.first;
+      final g = RouteGeometry.straight(r);
+      final t = Trip(id: 'x', route: r, departure: DateTime(2026, 11, 10, 8), driver: Demo.drivers.first, seats: const [], meetAlong: 300);
+      expect(t.meetAt(g), g.pointAt(300), reason: 'без точки на карте — место на линии');
+      expect(t.dropAt(g), g.points.last);
+      expect(inStartArea(r, r.from.point), isTrue);
+      expect(inStartArea(r, GeoPoint(r.from.point.lat + 0.012, r.from.point.lon)), isTrue, reason: '~1,3 км к северу');
+      expect(inStartArea(r, GeoPoint(r.from.point.lat + 0.02, r.from.point.lon)), isFalse, reason: '~2,2 км');
+      expect(inEndArea(r, r.to.point), isTrue);
+      expect(inEndArea(r, r.from.point), isFalse);
+      final ring = circlePoints(r.from.point, 1500);
+      for (final p in ring) {
+        expect(distanceMeters(p, r.from.point), closeTo(1500, 15));
+      }
     });
 
     test('в легковой машине сзади не больше двух мест: у всех рейсов нет среднего места', () {

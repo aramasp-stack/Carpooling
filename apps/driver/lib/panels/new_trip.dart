@@ -23,27 +23,29 @@ class _NewTripPanelState extends State<NewTripPanel> {
 
   late int day;
   late TimeOfDay time;
-  late double meet;
 
-  /// Место высадки: сколько метров не доезжая до конца маршрута (0 — в самом конце).
-  late double dropLeft;
+  /// Места посадки и высадки — любые точки в районах начала и конца маршрута (круги на карте):
+  /// дом, двор, остановка. Так машины не обязаны стоять в одной точке, а пассажир выбирает удобное место.
+  late GeoPoint meetP;
+  late GeoPoint dropP;
+
+  /// Какую точку ставит касание карты там, где районы начала и конца пересекаются (короткий маршрут).
+  String editing = 'meet';
   late List<_SeatOffer> seats;
 
   RouteDef get route => widget.route;
   DriverHomeState get h => widget.home;
   RouteGeometry get g => h.geoOf(route);
 
-  /// Место посадки — только в начальном районе маршрута.
+  /// Ближайшее к месту посадки место на линии — только в начальном районе маршрута (по нему считается время в пути).
   double get meetMax => Demo.startDistrictMeters < g.length ? Demo.startDistrictMeters : g.length;
 
-  /// Место высадки — только в конечном районе маршрута и дальше начального.
+  /// Ближайшее к месту высадки место на линии — в конечном районе маршрута и дальше начального.
   double get dropMin {
     final a = g.length - Demo.endDistrictMeters, b = meetMax + 200;
     final m = a > b ? a : b;
     return m > g.length ? g.length : m;
   }
-
-  double get drop => (g.length - dropLeft).clamp(dropMin, g.length).toDouble();
 
   @override
   void initState() {
@@ -51,8 +53,8 @@ class _NewTripPanelState extends State<NewTripPanel> {
     final t = widget.template;
     day = 1;
     time = t == null ? const TimeOfDay(hour: 8, minute: 0) : TimeOfDay(hour: t.departure.hour, minute: t.departure.minute);
-    meet = (t?.meetAlong ?? 0).clamp(0, meetMax).toDouble();
-    dropLeft = t?.dropAlong == null ? 0 : (g.length - t!.dropAlong!).clamp(0, g.length - dropMin).toDouble();
+    meetP = t == null ? route.from.point : t.meetAt(g);
+    dropP = t == null ? route.to.point : t.dropAt(g);
     // Места — те, что водитель указал в анкете; в рейсе он выставляет все или часть.
     seats = [
       for (final s in seatsFor(route, h.me.application.seatIds))
@@ -74,79 +76,50 @@ class _NewTripPanelState extends State<NewTripPanel> {
   void _showOnMap({bool fit = false}) {
     h.map.clearAll();
     h.map.showRoutes([MapRoute(route, g)]);
-    h.map.setSegment(g.subLine(0, meetMax), color: _accent);
-    h.map.setSecondSegment(g.subLine(dropMin, g.length), color: _accent);
-    h.map.setMarker('meet', g.pointAt(meet), MarkerKind.start, hint: 'Место посадки');
-    h.map.setMarker('finish', g.pointAt(drop), MarkerKind.finish, hint: 'Место высадки');
-    if (fit) h.map.fit(g.points);
+    h.map.setRings([
+      circlePoints(route.from.point, Demo.areaRadiusMeters),
+      circlePoints(route.to.point, Demo.areaRadiusMeters),
+    ], color: _accent);
+    h.map.setMarker('meet', meetP, MarkerKind.start, hint: 'Место посадки');
+    h.map.setMarker('finish', dropP, MarkerKind.finish, hint: 'Место высадки');
+    if (fit) h.map.fit([...g.points, ...circlePoints(route.from.point, Demo.areaRadiusMeters, n: 8)]);
   }
 
-  /// Касание карты: в начальном районе — место посадки, в конечном — место высадки.
+  /// Касание карты: в районе начала маршрута — место посадки, в районе конца — место высадки.
   void _onMapTap(GeoPoint p) {
-    final n = g.nearest(p);
-    final a = (n.along / 10).round() * 10.0;
-    final nearStart = a <= meetMax + 100, nearEnd = a >= dropMin - 100;
-    if (n.distance > 300 || (!nearStart && !nearEnd)) {
-      toast(context, 'Посадка — в начале маршрута, высадка — в конце: нажмите на выделенную часть линии.');
+    final s = inStartArea(route, p), e = inEndArea(route, p);
+    if (!s && !e) {
+      toast(context, 'Место посадки отмечается внутри круга у начала маршрута, место высадки — внутри круга у конца.');
       return;
     }
     setState(() {
-      if (nearStart && (!nearEnd || (a - meet).abs() <= (a - drop).abs())) {
-        meet = a.clamp(0, meetMax).toDouble();
+      if (s && (!e || editing == 'meet')) {
+        meetP = p;
+        editing = 'meet';
       } else {
-        dropLeft = g.length - a.clamp(dropMin, g.length);
+        dropP = p;
+        editing = 'drop';
       }
     });
     _showOnMap();
   }
 
-  /// Показать точку крупно — чтобы поставить её точнее касанием карты.
-  void _zoomTo(GeoPoint p) => h.map.showAround(p, meters: 300);
-
-  /// Место посадки или высадки: описание, «крупно на карте», ползунок и шаги по 10 м.
-  Widget _pointEditor({
-    required String text,
-    required GeoPoint point,
-    required double value,
-    required double min,
-    required double max,
-    required ValueChanged<double> onChanged,
-  }) {
-    void set(double v) {
-      onChanged(v.clamp(min, max).toDouble());
-      _showOnMap();
-    }
-
-    final can = max - min >= 10;
-    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      Row(children: [
-        Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600))),
-        TextButton.icon(onPressed: () => _zoomTo(point), icon: const Icon(Icons.zoom_in, size: 18), label: const Text('Крупно')),
-      ]),
-      if (can)
-        Row(children: [
-          IconButton(
-            tooltip: '10 м назад',
-            onPressed: value - 10 >= min - 0.1 ? () => set(value - 10) : null,
-            icon: const Icon(Icons.chevron_left),
-          ),
-          Expanded(
-            child: Slider(
-              value: value.clamp(min, max).toDouble(),
-              min: min,
-              max: max,
-              divisions: ((max - min) / 10).round().clamp(1, 1000),
-              onChanged: set,
-            ),
-          ),
-          IconButton(
-            tooltip: '10 м вперёд',
-            onPressed: value + 10 <= max + 0.1 ? () => set(value + 10) : null,
-            icon: const Icon(Icons.chevron_right),
-          ),
-        ]),
-    ]);
+  /// Показать место крупно — чтобы точнее отметить дом или двор касанием карты.
+  void _zoomTo(String which) {
+    setState(() => editing = which);
+    h.map.showAround(which == 'meet' ? meetP : dropP, meters: 300);
   }
+
+  /// Описание места: начало (конец) маршрута или точка на карте в стольких-то метрах от него.
+  String _where(GeoPoint p, Place anchor, String atAnchor) {
+    final d = distanceMeters(p, anchor.point);
+    return d < 30 ? '$atAnchor, «${anchor.name}»' : 'Точка на карте · ${meters(d)} от «${anchor.name}»';
+  }
+
+  Widget _pointRow(String which, String text) => Row(children: [
+        Expanded(child: Text(text, style: const TextStyle(fontWeight: FontWeight.w600))),
+        TextButton.icon(onPressed: () => _zoomTo(which), icon: const Icon(Icons.zoom_in, size: 18), label: const Text('Крупно')),
+      ]);
 
   DateTime get departure {
     final d = dayStart(day, now: h.trips.now);
@@ -188,26 +161,14 @@ class _NewTripPanelState extends State<NewTripPanel> {
         },
       ),
       const SectionTitle('Место посадки'),
-      _pointEditor(
-        text: meet < 10 ? 'В начале маршрута, «${route.from.name}»' : 'В ${meters(meet)} от «${route.from.name}» по маршруту',
-        point: g.pointAt(meet),
-        value: meet,
-        min: 0,
-        max: meetMax,
-        onChanged: (v) => setState(() => meet = v),
-      ),
+      _pointRow('meet', _where(meetP, route.from, 'Начало маршрута')),
       const SectionTitle('Место высадки', top: 6),
-      _pointEditor(
-        text: dropLeft < 10 ? 'В конце маршрута, «${route.to.name}»' : 'За ${meters(dropLeft)} до «${route.to.name}»',
-        point: g.pointAt(drop),
-        value: drop,
-        min: dropMin,
-        max: g.length,
-        onChanged: (v) => setState(() => dropLeft = g.length - v),
-      ),
+      _pointRow('drop', _where(dropP, route.to, 'Конец маршрута')),
+      const SizedBox(height: 4),
       const Text(
-          'Нажмите «Крупно», потом — на нужное место выделенной части линии: в начале маршрута ставится посадка, в конце — высадка. '
-          'Точнее — стрелками, по 10 м. Пассажиры сами приходят к месту посадки, все выходят на месте высадки.',
+          'На карте пунктиром обведены районы начала и конца маршрута. Нажмите «Крупно» и коснитесь нужного места — '
+          'дома, двора, остановки: в районе начала ставится посадка, в районе конца — высадка. '
+          'Пассажиры сами приходят к месту посадки, все выходят на месте высадки.',
           style: TextStyle(fontSize: 12, color: AppColors.muted)),
       const SectionTitle('Места и цены'),
       const Text('Места вашей машины из анкеты. Выключите те, что в этом рейсе не продаёте.',
@@ -295,8 +256,11 @@ class _NewTripPanelState extends State<NewTripPanel> {
       date: ymd(dep),
       time: hm,
       driverIndex: Demo.meIndex,
-      meetAlong: meet,
-      dropAlong: dropLeft < 1 ? null : drop.roundToDouble(),
+      // Точные места — как отметил водитель; на линии — ближайшие к ним места (по ним считается время в пути).
+      meetAlong: g.nearest(meetP).along.clamp(0, meetMax).roundToDouble(),
+      dropAlong: g.nearest(dropP).along.clamp(dropMin, g.length).roundToDouble(),
+      meetPoint: meetP,
+      dropPoint: dropP,
       seats: [for (final s in seats.where((s) => s.on)) Seat(id: s.seat.id, label: s.seat.label, price: s.price)],
     ));
     if (!mounted) return;

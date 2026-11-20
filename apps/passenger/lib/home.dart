@@ -166,13 +166,14 @@ class HomeState extends State<HomeScreen> {
 
   /// Сколько идти от «откуда» до ближайшего места посадки на маршруте (по рейсам на 3 дня), метры.
   double meetWalk(RouteMatch m) {
-    final alongs = {
+    // Точное место посадки: отмеченное водителем на карте или точка на линии маршрута.
+    final points = {
       for (var d = 0; d < 3; d++)
-        for (final t in trips.tripsFor(m.route, d)) t.meetAlong,
+        for (final t in trips.tripsFor(m.route, d)) t.meetAt(m.geometry),
     };
     var best = double.infinity;
-    for (final a in alongs) {
-      final d = distanceMeters(from!.point, m.geometry.pointAt(a));
+    for (final p in points) {
+      final d = distanceMeters(from!.point, p);
       if (d < best) best = d;
     }
     return best;
@@ -261,7 +262,7 @@ class HomeState extends State<HomeScreen> {
   }
 
   /// Где водитель ждёт пассажиров.
-  GeoPoint meetPoint(Trip t, RouteGeometry g) => g.pointAt(t.meetAlong);
+  GeoPoint meetPoint(Trip t, RouteGeometry g) => t.meetAt(g);
 
   /// Сколько идти от «откуда» до места посадки, метры.
   double walkTo(Trip t, RouteGeometry g) => from == null ? 0 : distanceMeters(from!.point, meetPoint(t, g));

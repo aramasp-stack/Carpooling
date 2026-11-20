@@ -26,12 +26,12 @@ extension TripScreen on DriverHomeState {
       Row(children: [
         const Icon(Icons.place, size: 16, color: Color(0xFF2563EB)),
         const SizedBox(width: 4),
-        Expanded(child: Text('Посадка ${meetText(t)}', style: const TextStyle(fontSize: 13))),
+        Expanded(child: Text('Посадка — ${meetText(t)}', style: const TextStyle(fontSize: 13))),
       ]),
       Row(children: [
         const Icon(Icons.flag, size: 16, color: AppColors.to),
         const SizedBox(width: 4),
-        Expanded(child: Text('Высадка ${dropText(t)}', style: const TextStyle(fontSize: 13))),
+        Expanded(child: Text('Высадка — ${dropText(t)}', style: const TextStyle(fontSize: 13))),
       ]),
       SectionTitle('Пассажиры · ${taken.length} из ${t.seats.length}'),
       if (taken.isEmpty) const Text('Пока никто не купил место.', style: TextStyle(color: AppColors.muted)),
@@ -146,8 +146,8 @@ extension TripScreen on DriverHomeState {
 
   Widget _navButton(Trip t) {
     final g = geoOf(t.route);
-    final meet = g.pointAt(t.meetAlong);
-    final drop = g.pointAt(t.dropOn(g.length));
+    final meet = t.meetAt(g);
+    final drop = t.dropAt(g);
     return OutlinedButton.icon(
       onPressed: () => launchUrl(
         Uri.parse('https://yandex.ru/maps/?rtext=${meet.lat},${meet.lon}~${drop.lat},${drop.lon}&rtt=auto'),
@@ -342,7 +342,7 @@ extension TripScreen on DriverHomeState {
       const Text('Симуляция: машина едет по маршруту без настоящего GPS.', style: TextStyle(fontSize: 12, color: AppColors.muted)),
       const SizedBox(height: 10),
       Text(eta, style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w700)),
-      Text(toMeet > 20 ? 'Посадка ${meetText(t)}' : 'Высадка всех пассажиров ${dropText(t)}', style: const TextStyle(color: AppColors.muted)),
+      Text(toMeet > 20 ? 'Посадка — ${meetText(t)}' : 'Высадка всех пассажиров — ${dropText(t)}', style: const TextStyle(color: AppColors.muted)),
       const SizedBox(height: 10),
       ClipRRect(
         borderRadius: BorderRadius.circular(6),

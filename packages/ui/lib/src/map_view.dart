@@ -63,6 +63,16 @@ class TransportMapController {
     _state?._renderRoutes();
   }
 
+  List<List<GeoPoint>> _rings = const [];
+  Color _ringColor = AppColors.text;
+
+  /// Границы районов (замкнутые линии) — например, круги, где водитель может отметить место посадки и высадки.
+  void setRings(List<List<GeoPoint>> rings, {Color color = AppColors.text}) {
+    _rings = rings;
+    _ringColor = color;
+    _state?._renderRoutes();
+  }
+
   void setMarker(String key, GeoPoint? point, MarkerKind kind, {String? hint}) {
     if (point == null) {
       _markers.remove(key);
@@ -106,6 +116,7 @@ class TransportMapController {
     _routes = const [];
     _segment = null;
     _segment2 = null;
+    _rings = const [];
     _markers.clear();
     _car = null;
     _state?._renderRoutes();
@@ -222,6 +233,13 @@ class _TransportMapState extends State<TransportMap> implements ym.MapInputListe
         ..setStrokeColor(Color(r.route.color).withValues(alpha: r.dimmed ? 0.25 : 0.95))
         ..style = const ym.LineStyle(strokeWidth: 5, outlineColor: Colors.white, outlineWidth: 1.5)
         ..zIndex = r.dimmed ? 5 : 10;
+    }
+    for (final ring in c._rings) {
+      if (ring.length < 2) continue;
+      layer.addPolylineWithGeometry(ym.Polyline(ring.map(_pt).toList()))
+        ..setStrokeColor(c._ringColor.withValues(alpha: 0.85))
+        ..style = const ym.LineStyle(strokeWidth: 3, outlineColor: Colors.white, outlineWidth: 1, dashLength: 8, gapLength: 6)
+        ..zIndex = 15;
     }
     for (final (seg, color) in [(c._segment, c._segmentColor), (c._segment2, c._segment2Color)]) {
       if (seg == null || seg.length < 2) continue;

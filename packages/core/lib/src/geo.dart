@@ -23,6 +23,21 @@ double bearingDeg(GeoPoint a, GeoPoint b) {
   return (math.atan2(y, x) * 180 / math.pi + 360) % 360;
 }
 
+/// Точки окружности радиусом [meters] вокруг [center] — чтобы нарисовать район на карте.
+List<GeoPoint> circlePoints(GeoPoint center, double meters, {int n = 64}) {
+  final dLat = meters / 111320, dLon = meters / (111320 * math.cos(_rad(center.lat)));
+  return [
+    for (var i = 0; i <= n; i++)
+      GeoPoint(center.lat + dLat * math.sin(2 * math.pi * i / n), center.lon + dLon * math.cos(2 * math.pi * i / n)),
+  ];
+}
+
+/// Точные места посадки и высадки рейса: отмеченные водителем на карте или точки на линии маршрута.
+extension TripPlaces on Trip {
+  GeoPoint meetAt(RouteGeometry g) => meetPoint ?? g.pointAt(meetAlong);
+  GeoPoint dropAt(RouteGeometry g) => dropPoint ?? g.pointAt(dropOn(g.length));
+}
+
 /// Ближайшая к пассажиру позиция на маршруте.
 class NearestPoint {
   const NearestPoint(this.distance, this.along);

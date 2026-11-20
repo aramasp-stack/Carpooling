@@ -58,13 +58,15 @@ extension TripsPanel on DriverHomeState {
     ]);
   }
 
-  /// «у начала маршрута» или «в 400 м от «Давташен»».
-  String meetText(Trip t) => t.meetAlong < 10 ? 'в начале маршрута, «${t.route.from.name}»' : 'в ${meters(t.meetAlong)} от «${t.route.from.name}»';
+  /// «в начале маршрута, «Давташен»» или «точка на карте в 400 м от «Давташен»».
+  String meetText(Trip t) {
+    final d = distanceMeters(t.meetAt(geoOf(t.route)), t.route.from.point);
+    return d < 30 ? 'в начале маршрута, «${t.route.from.name}»' : 'точка на карте в ${meters(d)} от «${t.route.from.name}»';
+  }
 
   String dropText(Trip t) {
-    final g = geoOf(t.route);
-    final left = g.length - t.dropOn(g.length);
-    return left < 10 ? 'в конце маршрута, «${t.route.to.name}»' : 'за ${meters(left)} до «${t.route.to.name}»';
+    final d = distanceMeters(t.dropAt(geoOf(t.route)), t.route.to.point);
+    return d < 30 ? 'в конце маршрута, «${t.route.to.name}»' : 'точка на карте в ${meters(d)} от «${t.route.to.name}»';
   }
 
   Widget _tripItem(Trip t) {
